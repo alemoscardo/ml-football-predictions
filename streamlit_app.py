@@ -24,6 +24,11 @@ st.success(f"Loaded {model_choice} model successfully!")
 
 st.header("Upload Match Stats (CSV)")
 
+st.markdown("""
+> ℹ️ **Need an example?**  
+> A sample CSV is available in the [`data/` folder of this repository](https://github.com/alemoscardo/ml-football-predictions/tree/main/data) for testing the app.
+""")
+
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 # Helper function to preprocess uploaded CSV
