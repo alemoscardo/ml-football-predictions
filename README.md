@@ -16,6 +16,8 @@ This project is designed to simulate a real-world sports analytics pipeline. It 
 
 It includes a multi-model comparison, interactive user interface, and CSV input support — ideal for demonstrating applied machine learning and user-facing deployment.
 
+Try the app here: [Football Match Outcome Predictor](https://alemoscardo-ml-football-predictions-streamlit-app-vkbxgd.streamlit.app/)
+
 ---
 
 ## Key Features
