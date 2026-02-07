@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from feature_engineering import MODEL_FEATURES, build_feature_matrix, prepare_matches_dataframe
+from train_models import build_models, load_raw_matches, split_temporal_holdout
 
 st.set_page_config(page_title="Football Model Showcase", layout="wide")
 
@@ -64,6 +65,36 @@ def load_features() -> list[str]:
     return MODEL_FEATURES
 
 
+@st.cache_resource(show_spinner=False)
+def rebuild_showcase_model(model_name: str):
+    raw_matches = load_raw_matches()
+    prepared_matches = prepare_matches_dataframe(raw_matches)
+    train_df, _, _, _ = split_temporal_holdout(prepared_matches)
+
+    _, tuned_logistic, tuned_extra_trees = build_models()
+    models = {
+        "Extra Trees (Tuned)": tuned_extra_trees,
+        "Logistic Regression (Tuned)": tuned_logistic,
+    }
+    model = models[model_name]
+    model.fit(train_df[MODEL_FEATURES], train_df["Result"])
+    return model
+
+
+def run_inference_with_fallback(model, X: pd.DataFrame, model_name: str):
+    try:
+        preds = model.predict(X)
+        probabilities = model.predict_proba(X) if hasattr(model, "predict_proba") else None
+        return preds, probabilities, False
+    except AttributeError as exc:
+        if "_fill_dtype" not in str(exc):
+            raise
+        rebuilt_model = rebuild_showcase_model(model_name)
+        preds = rebuilt_model.predict(X)
+        probabilities = rebuilt_model.predict_proba(X) if hasattr(rebuilt_model, "predict_proba") else None
+        return preds, probabilities, True
+
+
 st.title("Football Match Outcome Model Showcase")
 st.caption("Predictions are evaluated on a temporal holdout season not used during showcase training.")
 
@@ -110,11 +141,22 @@ info_col_3.metric("Test Season", str(metrics.get("test_season", showcase_dataset
 
 df_processed = prepare_matches_dataframe(df_raw)
 X = build_feature_matrix(df_raw, features)
-preds = pd.Series(model.predict(X), index=df_processed.index)
+try:
+    pred_values, proba_values, rebuilt = run_inference_with_fallback(model, X, model_choice)
+except Exception as exc:
+    st.error(f"Unable to run inference: {exc}")
+    st.stop()
 
+if rebuilt:
+    st.warning(
+        "Detected a scikit-learn artifact/runtime mismatch. "
+        "Rebuilt the selected showcase model in this environment."
+    )
+
+preds = pd.Series(pred_values, index=df_processed.index)
 confidence = None
-if hasattr(model, "predict_proba"):
-    confidence = pd.Series(model.predict_proba(X).max(axis=1), index=df_processed.index)
+if proba_values is not None:
+    confidence = pd.Series(proba_values.max(axis=1), index=df_processed.index)
 
 results = df_processed.copy()
 results["Predicted"] = preds.map(LABEL_MAP).fillna(preds.astype(str))
