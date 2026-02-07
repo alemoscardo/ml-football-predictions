@@ -1,0 +1,6 @@
+{
+  "train_seasons": "E0_2122, E0_2223",
+  "test_season": "E0_2324",
+  "current_model": "Tuned Extra Trees",
+  "current_accuracy": 0.65
+}
