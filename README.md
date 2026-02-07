@@ -9,7 +9,7 @@ Machine learning app to predict English Premier League outcomes (`H`, `D`, `A`) 
 This repo contains:
 - A reproducible training pipeline (`train_models.py`)
 - Shared feature engineering (`feature_engineering.py`)
-- A Streamlit app (`streamlit_app.py`) for CSV and manual predictions
+- A Streamlit app (`streamlit_app.py`) that showcases trained models on a fixed temporal holdout dataset
 
 ## What Changed
 
@@ -19,15 +19,16 @@ The modeling pipeline was upgraded to improve prediction quality:
 - Switched to a tuned `ExtraTreesClassifier`
 - Added temporal holdout evaluation to better reflect real forecasting
 
-## Model Performance
+## Showcase Evaluation
 
 Temporal holdout setup:
 - Train: `E0_2122`, `E0_2223`
 - Test: `E0_2324`
 
-| Current Best Model | Accuracy |
+| Model | Accuracy |
 |---|---:|
-| Tuned Extra Trees | **65.00%** |
+| Logistic Regression (Tuned) | 61.05% |
+| Extra Trees (Tuned) | **65.00%** |
 
 ## Data Source
 

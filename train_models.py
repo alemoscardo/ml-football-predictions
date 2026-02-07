@@ -68,7 +68,7 @@ def build_models() -> tuple[Pipeline, Pipeline, Pipeline]:
     return legacy_logistic, tuned_logistic, tuned_extra_trees
 
 
-def evaluate_temporal_holdout(matches: pd.DataFrame) -> dict[str, float | str]:
+def split_temporal_holdout(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[str], str]:
     seasons = sorted(matches["SeasonFile"].dropna().unique().tolist())
     if len(seasons) < 2:
         raise ValueError("Need at least two season files to run a temporal holdout.")
@@ -82,17 +82,51 @@ def evaluate_temporal_holdout(matches: pd.DataFrame) -> dict[str, float | str]:
     train_df = train_df[train_df["Result"].notna()].copy()
     test_df = test_df[test_df["Result"].notna()].copy()
 
-    _, _, tuned_extra_trees = build_models()
+    return train_df, test_df, train_seasons, test_season
 
-    tuned_extra_trees.fit(train_df[MODEL_FEATURES], train_df["Result"])
-    tuned_extra_trees_pred = tuned_extra_trees.predict(test_df[MODEL_FEATURES])
-    tuned_extra_trees_accuracy = accuracy_score(test_df["Result"], tuned_extra_trees_pred)
+
+def evaluate_and_save_showcase_models(matches: pd.DataFrame) -> dict[str, object]:
+    train_df, test_df, train_seasons, test_season = split_temporal_holdout(matches)
+    _, tuned_logistic, tuned_extra_trees = build_models()
+
+    model_runs = [
+        ("Logistic Regression (Tuned)", "logistic_regression_showcase_model.pkl", tuned_logistic),
+        ("Extra Trees (Tuned)", "extra_trees_showcase_model.pkl", tuned_extra_trees),
+    ]
+
+    X_train = train_df[MODEL_FEATURES]
+    y_train = train_df["Result"]
+    X_test = test_df[MODEL_FEATURES]
+    y_test = test_df["Result"]
+
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    model_metrics: dict[str, dict[str, float | str]] = {}
+    best_model = ""
+    best_accuracy = -1.0
+
+    for model_name, artifact_name, model in model_runs:
+        model.fit(X_train, y_train)
+        preds = model.predict(X_test)
+        accuracy = float(accuracy_score(y_test, preds))
+
+        joblib.dump(model, MODELS_DIR / artifact_name)
+        model_metrics[model_name] = {
+            "artifact": artifact_name,
+            "accuracy": accuracy,
+        }
+
+        if accuracy > best_accuracy:
+            best_model = model_name
+            best_accuracy = accuracy
 
     return {
         "train_seasons": ", ".join(train_seasons),
         "test_season": test_season,
-        "current_model": "Tuned Extra Trees",
-        "current_accuracy": tuned_extra_trees_accuracy,
+        "train_rows": int(len(train_df)),
+        "test_rows": int(len(test_df)),
+        "models": model_metrics,
+        "current_model": best_model,
+        "current_accuracy": best_accuracy,
     }
 
 
@@ -118,7 +152,7 @@ def main() -> None:
     raw_matches = load_raw_matches()
     prepared_matches = prepare_matches_dataframe(raw_matches)
 
-    metrics = evaluate_temporal_holdout(prepared_matches)
+    metrics = evaluate_and_save_showcase_models(prepared_matches)
     train_and_save_final_models(prepared_matches)
 
     metrics_path = MODELS_DIR / "model_metrics.json"
@@ -127,6 +161,9 @@ def main() -> None:
     print("Temporal holdout evaluation")
     print(f"Train seasons: {metrics['train_seasons']}")
     print(f"Test season : {metrics['test_season']}")
+    print("Model accuracies:")
+    for model_name, model_info in metrics["models"].items():
+        print(f"  - {model_name}: {model_info['accuracy']:.4f} ({model_info['artifact']})")
     print(f"Current model: {metrics['current_model']}")
     print(f"Current accuracy: {metrics['current_accuracy']:.4f}")
     print(f"Saved model artifacts to: {MODELS_DIR.resolve()}")

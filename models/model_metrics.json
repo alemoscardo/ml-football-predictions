@@ -1,6 +1,18 @@
 {
   "train_seasons": "E0_2122, E0_2223",
   "test_season": "E0_2324",
-  "current_model": "Tuned Extra Trees",
+  "train_rows": 760,
+  "test_rows": 380,
+  "models": {
+    "Logistic Regression (Tuned)": {
+      "artifact": "logistic_regression_showcase_model.pkl",
+      "accuracy": 0.6105263157894737
+    },
+    "Extra Trees (Tuned)": {
+      "artifact": "extra_trees_showcase_model.pkl",
+      "accuracy": 0.65
+    }
+  },
+  "current_model": "Extra Trees (Tuned)",
   "current_accuracy": 0.65
 }
