@@ -1,0 +1,11 @@
+# No `base` is set, so the app defaults to the viewer's system light/dark
+# setting; the in-app "Dark theme" toggle overrides it and persists per browser.
+# Only the accent colour is customised, per mode.
+[theme]
+primaryColor = "#10B981"
+
+[theme.light]
+primaryColor = "#059669"
+
+[browser]
+gatherUsageStats = false

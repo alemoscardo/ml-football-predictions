@@ -4,12 +4,28 @@
 
 Machine learning app to predict English Premier League outcomes (`H`, `D`, `A`) from match statistics.
 
+![Dashboard](docs/dashboard.png)
+
 ## Overview
 
 This repo contains:
 - A reproducible training pipeline (`train_models.py`)
 - Shared feature engineering (`feature_engineering.py`)
 - A Streamlit app (`streamlit_app.py`) that showcases trained models on a fixed temporal holdout dataset
+
+## The App
+
+One page, built for a quick read:
+- **Headline KPIs:** accuracy and log-loss on the unseen season, each against the bookmaker
+- **How it compares:** the model next to random guessing, always backing the home side and the
+  bookmaker favourite
+- **How it behaves:** running accuracy across the season, confidence vs. hit rate, a confusion
+  matrix and permutation feature importance
+- **Every match:** filterable table (team, misses, matches where the model beat the bookmaker);
+  select a row to compare model and bookmaker probabilities, or export to CSV
+
+Models are trained in-process at startup (about a second), so the app never depends on the
+scikit-learn version that wrote a pickle.
 
 ## What Changed
 
