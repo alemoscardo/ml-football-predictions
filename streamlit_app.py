@@ -1,11 +1,13 @@
-"""Streamlit showcase for the Premier League match-outcome models.
+"""Streamlit showcase for the Premier League pre-match outcome models.
 
-Trains each classifier on the earlier seasons, scores it on a season held out in
-time, and puts the result next to the benchmarks that give it meaning: random
-guessing, always backing the home side, and the bookmaker favourite.
+Fits the model chosen on the validation season, scores it on the most recent
+season, and puts the result next to the benchmarks that give it meaning:
+random guessing, always backing the home side, and the bookmaker favourite.
 """
 
 from __future__ import annotations
+
+import json
 
 import altair as alt
 import numpy as np
@@ -14,8 +16,8 @@ import streamlit as st
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import log_loss, precision_recall_fscore_support
 
-from feature_engineering import MODEL_FEATURES, ODDS_FEATURES, prepare_matches_dataframe
-from train_models import build_models, load_raw_matches, split_temporal_holdout
+from feature_engineering import FEATURE_SETS, FORM_WINDOW, ODDS_FEATURES
+from train_models import METRICS_PATH, load_dataset, make_model, predict_sorted, split_seasons
 
 st.set_page_config(
     page_title="EPL Outcome Model",
@@ -37,50 +39,52 @@ st.markdown(
 
 CLASS_ORDER = ["H", "D", "A"]
 LABEL_MAP = {"H": "Home win", "D": "Draw", "A": "Away win"}
-MODEL_NAMES = {"Extra Trees": 2, "Logistic Regression": 1}  # index into build_models()
+BOOKIE_COLUMNS = {"H": "NormProbHome_B365", "D": "NormProbDraw_B365", "A": "NormProbAway_B365"}
 
+W = FORM_WINDOW
 FEATURE_LABELS = {
-    "HomeShots": "Home shots",
-    "AwayShots": "Away shots",
-    "HomeShotsTarget": "Home shots on target",
-    "AwayShotsTarget": "Away shots on target",
-    "HomeCorners": "Home corners",
-    "AwayCorners": "Away corners",
-    "HomeFouls": "Home fouls",
-    "AwayFouls": "Away fouls",
-    "HomeYellows": "Home yellow cards",
-    "AwayYellows": "Away yellow cards",
-    "HomeReds": "Home red cards",
-    "AwayReds": "Away red cards",
-    "ShotDiff": "Shot difference",
-    "ShotTargetDiff": "Shots-on-target difference",
-    "CornersDiff": "Corner difference",
-    "FoulsDiff": "Foul difference",
-    "YellowsDiff": "Yellow-card difference",
-    "RedsDiff": "Red-card difference",
-    "HomeShotAcc": "Home shot accuracy",
-    "AwayShotAcc": "Away shot accuracy",
-    "ShotAccDiff": "Shot-accuracy difference",
-    "AggressionDiff": "Discipline difference",
-    "B365H": "Home odds",
-    "B365D": "Draw odds",
-    "B365A": "Away odds",
-    "NormProbHome_B365": "Implied P(home win)",
-    "NormProbDraw_B365": "Implied P(draw)",
-    "NormProbAway_B365": "Implied P(away win)",
-    "OddsEdgeHome_B365": "Odds gap (away − home)",
+    "HomeElo": "Home Elo rating",
+    "AwayElo": "Away Elo rating",
+    "EloDiff": "Elo difference",
+    "EloHomeWinProb": "Elo home-win probability",
+    **{
+        f"{side}{stat}L{W}": f"{side} {label}, last {W}"
+        for side in ("Home", "Away")
+        for stat, label in [
+            ("Points", "points"),
+            ("GoalsFor", "goals scored"),
+            ("GoalsAgainst", "goals conceded"),
+            ("ShotsTargetFor", "shots on target"),
+            ("ShotsTargetAgainst", "shots on target faced"),
+        ]
+    },
+    "HomeRestDays": "Home rest days",
+    "AwayRestDays": "Away rest days",
+    "FormPointsDiff": f"Points-per-game gap, last {W}",
+    "GoalDiffDiff": f"Goal-difference gap, last {W}",
+    "ShotsTargetDiffDiff": f"Shots-on-target gap, last {W}",
+    "NormProbHome_B365": "Bookmaker P(home win)",
+    "NormProbDraw_B365": "Bookmaker P(draw)",
+    "NormProbAway_B365": "Bookmaker P(away win)",
 }
+FAMILIES = ["Team strength (Elo)", "Recent form & rest", "Bookmaker odds"]
+
+
+def feature_family(feature: str) -> str:
+    if feature in ODDS_FEATURES:
+        return FAMILIES[2]
+    return FAMILIES[0] if "Elo" in feature else FAMILIES[1]
+
 
 # Chart colours per theme. The model is the one highlighted series; benchmarks
-# stay neutral. The two feature families use slots 1–2 of a CVD-validated palette.
+# stay neutral. Feature families use slots 1–3 of a CVD-validated palette.
 PALETTES = {
     "dark": {
         "accent": "#10B981",
         "neutral": "#5A6B85",
         "text": "#E6EAF3",
         "muted": "#8B98AD",
-        "match": "#3987e5",
-        "odds": "#d95926",
+        "families": ["#3987e5", "#d95926", "#199e70"],
         "ramp": ["#0f2a22", "#10B981"],
     },
     "light": {
@@ -88,8 +92,7 @@ PALETTES = {
         "neutral": "#A3ACB9",
         "text": "#1F2937",
         "muted": "#6B7280",
-        "match": "#2a78d6",
-        "odds": "#eb6834",
+        "families": ["#2a78d6", "#eb6834", "#1baf7a"],
         "ramp": ["#ecfdf5", "#047857"],
     },
 }
@@ -101,41 +104,52 @@ def season_label(stem: str) -> str:
     return f"20{code[:2]}/{code[2:]}" if len(code) == 4 and code.isdigit() else stem
 
 
+def season_span(stems: list[str]) -> str:
+    return season_label(stems[0]) if len(stems) == 1 else f"{season_label(stems[0])} – {season_label(stems[-1])}"
+
+
 # --- Data & models -----------------------------------------------------------
 
 
-@st.cache_resource(show_spinner="Training models on the historical seasons…")
-def load_experiment():
-    """Fit every model on the training seasons.
+@st.cache_data(show_spinner=False)
+def load_report() -> dict:
+    """Model selection and scores written by ``train_models.py``."""
+    return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
 
-    Training takes about a second, so the app fits in-process instead of
+
+@st.cache_resource(show_spinner="Fitting the selected models…")
+def load_experiment():
+    """Refit each feature set's chosen spec on train + validation seasons.
+
+    Fitting takes a few seconds, so the app does it in-process instead of
     unpickling artifacts — no dependency on the scikit-learn version that wrote them.
     """
-    matches = prepare_matches_dataframe(load_raw_matches())
-    train_df, test_df, train_seasons, test_season = split_temporal_holdout(matches)
-    built = build_models()
+    matches = load_dataset()
+    split = split_seasons(matches)
+    fit_df = matches[matches["SeasonFile"].isin(split["train"] + split["validation"])]
+    test_df = matches[matches["SeasonFile"].isin(split["test"])].reset_index(drop=True)
+    report = load_report()
     models = {}
-    for name, index in MODEL_NAMES.items():
-        model = built[index]
-        model.fit(train_df[MODEL_FEATURES], train_df["Result"])
-        models[name] = model
-    return train_df, test_df.reset_index(drop=True), models, train_seasons, test_season
+    for set_name, features in FEATURE_SETS.items():
+        spec = report["feature_sets"][set_name]
+        models[set_name] = make_model(spec["algorithm"], spec["params"]).fit(
+            fit_df[features], fit_df["Result"]
+        )
+    return fit_df, test_df, models, split
 
 
 @st.cache_data(show_spinner=False)
-def score_model(model_name: str) -> pd.DataFrame:
-    """One row per holdout match: model and bookmaker probabilities, picks, hits."""
-    _, test_df, models, _, _ = load_experiment()
-    model = models[model_name]
+def score_model(set_name: str) -> pd.DataFrame:
+    """One row per test-season match: model and bookmaker probabilities, picks, hits."""
+    _, test_df, models, _ = load_experiment()
     proba = pd.DataFrame(
-        model.predict_proba(test_df[MODEL_FEATURES]), columns=list(model.classes_)
+        predict_sorted(models[set_name], test_df[FEATURE_SETS[set_name]]), columns=["A", "D", "H"]
     )[CLASS_ORDER]
-    bookie = test_df[["NormProbHome_B365", "NormProbDraw_B365", "NormProbAway_B365"]]
-    bookie.columns = CLASS_ORDER
+    bookie = pd.DataFrame({o: test_df[c] for o, c in BOOKIE_COLUMNS.items()})
 
     scored = pd.DataFrame(
         {
-            "Date": pd.to_datetime(test_df["Date"], dayfirst=True, errors="coerce"),
+            "Date": test_df["Date"],
             "Home": test_df["HomeTeam"],
             "Away": test_df["AwayTeam"],
             "HomeGoals": test_df["HomeGoals"].astype("Int64"),
@@ -156,12 +170,13 @@ def score_model(model_name: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Measuring feature importance…")
-def feature_importance(model_name: str) -> pd.DataFrame:
-    """Permutation importance on the holdout season (drop in log-loss)."""
-    _, test_df, models, _, _ = load_experiment()
+def feature_importance(set_name: str) -> pd.DataFrame:
+    """Permutation importance on the test season (increase in log-loss)."""
+    _, test_df, models, _ = load_experiment()
+    features = FEATURE_SETS[set_name]
     result = permutation_importance(
-        models[model_name],
-        test_df[MODEL_FEATURES],
+        models[set_name],
+        test_df[features],
         test_df["Result"],
         scoring="neg_log_loss",
         n_repeats=8,
@@ -169,11 +184,8 @@ def feature_importance(model_name: str) -> pd.DataFrame:
     )
     importance = pd.DataFrame(
         {
-            "Feature": [FEATURE_LABELS.get(f, f) for f in MODEL_FEATURES],
-            "Family": [
-                "Pre-match odds" if f in ODDS_FEATURES else "Full-time match stats"
-                for f in MODEL_FEATURES
-            ],
+            "Feature": [FEATURE_LABELS.get(f, f) for f in features],
+            "Family": [feature_family(f) for f in features],
             "Importance": result.importances_mean,
         }
     )
@@ -246,7 +258,7 @@ def season_chart(scored: pd.DataFrame, model_name: str, palette: dict[str, str])
             x=alt.X("Date:T", title=None, axis=alt.Axis(format="%b", tickCount=10)),
             y=alt.Y(
                 "Accuracy:Q",
-                scale=alt.Scale(domain=[0.4, 0.8]),
+                scale=alt.Scale(domain=[0.3, 0.7]),
                 axis=alt.Axis(format="%", tickCount=4),
                 title="Cumulative accuracy",
             ),
@@ -275,8 +287,8 @@ def season_chart(scored: pd.DataFrame, model_name: str, palette: dict[str, str])
 def confidence_chart(scored: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     bands = pd.cut(
         scored["Confidence"],
-        bins=[0, 0.5, 0.6, 0.7, 0.8, 1.0],
-        labels=["< 50%", "50–60%", "60–70%", "70–80%", "80%+"],
+        bins=[0, 0.4, 0.5, 0.6, 0.7, 1.0],
+        labels=["< 40%", "40–50%", "50–60%", "60–70%", "70%+"],
     )
     grouped = (
         scored.groupby(bands, observed=True)
@@ -347,6 +359,8 @@ def confusion_chart(scored: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
 
 def importance_chart(importance: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     order = importance["Feature"].tolist()
+    present = [f for f in FAMILIES if f in set(importance["Family"])]
+    colours = [palette["families"][FAMILIES.index(f)] for f in present]
     base = alt.Chart(importance).encode(
         y=alt.Y(
             "Feature:N",
@@ -367,13 +381,13 @@ def importance_chart(importance: pd.DataFrame, palette: dict[str, str]) -> alt.C
             color=alt.Color(
                 "Family:N",
                 scale=alt.Scale(
-                    domain=["Full-time match stats", "Pre-match odds"],
-                    range=[palette["match"], palette["odds"]],
+                    domain=present,
+                    range=colours,
                 ),
                 legend=alt.Legend(orient="top", title=None),
             )
         )
-        .properties(height=320)
+        .properties(height=360)
     )
 
 
@@ -407,15 +421,19 @@ def match_chart(match: pd.Series, model_name: str, palette: dict[str, str]) -> a
 
 # --- Load --------------------------------------------------------------------
 
+MODEL_LABEL = "Model"
+
 try:
-    train_df, test_df, _, train_seasons, test_season = load_experiment()
+    report = load_report()
+    fit_df, _, _, split = load_experiment()
 except Exception as exc:
-    st.error(f"Unable to train the models: {exc}")
+    st.error(f"Unable to fit the models: {exc}")
     st.stop()
 
 palette = PALETTES.get(st.context.theme.type or "dark", PALETTES["dark"])
-train_label = " and ".join(season_label(s) for s in train_seasons)
-test_label = season_label(test_season)
+train_label = season_span(split["train"])
+validation_label = season_label(split["validation"][0])
+test_label = season_label(split["test"][0])
 
 # --- Header ------------------------------------------------------------------
 
@@ -423,15 +441,23 @@ head, picker = st.columns([3, 1], vertical_alignment="bottom")
 with head:
     st.title("Premier League Outcome Model")
     st.markdown(
-        f"Classifies every {test_label} Premier League match as a home win, draw or away win. "
-        f"Trained on **{train_label}**, scored on **{test_label}**: a season the model never saw."
+        f"Forecasts every {test_label} Premier League match **before kick-off**, using only "
+        f"what was known at the time. Trained on {train_label}, tuned on {validation_label}, "
+        f"scored once on **{test_label}**."
     )
 with picker:
-    model_name = st.segmented_control(
-        "Model", list(MODEL_NAMES), default="Extra Trees", required=True
+    set_name = st.segmented_control(
+        "Features",
+        list(FEATURE_SETS),
+        default=list(FEATURE_SETS)[0],
+        required=True,
+        help="Form & Elo uses only public match history. The second set adds the "
+        "bookmaker's own probabilities as inputs.",
     )
 
-scored = score_model(model_name)
+spec = report["feature_sets"][set_name]
+head.caption(f"{spec['algorithm']} · picked by validation log-loss on {validation_label}")
+scored = score_model(set_name)
 y_true = scored["Result"]
 accuracy = scored["Hit"].mean()
 bookie_accuracy = scored["BookieHit"].mean()
@@ -459,7 +485,7 @@ k2.metric(
 k3.metric(
     "Called correctly", f"{int(scored['Hit'].sum())} / {len(scored)}", border=True, height="stretch"
 )
-k4.metric("Training matches", f"{len(train_df):,}", border=True, height="stretch")
+k4.metric("Training matches", f"{len(fit_df):,}", border=True, height="stretch")
 
 # --- Benchmarks --------------------------------------------------------------
 
@@ -469,16 +495,16 @@ benchmarks = pd.DataFrame(
         ("Random guess", 1 / 3, "Pick one of the three outcomes at random", False),
         ("Always back the home side", (y_true == "H").mean(), "Predict a home win every time", False),
         ("Bookmaker favourite", bookie_accuracy, "Pick the outcome with the shortest Bet365 odds", False),
-        (model_name, accuracy, "This model, on the unseen season", True),
+        (f"Model ({set_name})", accuracy, "This model, on the unseen season", True),
     ],
     columns=["Approach", "Accuracy", "How", "IsModel"],
 )
 with st.container(border=True):
     st.altair_chart(benchmark_chart(benchmarks, palette), width="stretch")
     st.caption(
-        "**Read with care:** the model sees full-time match statistics (shots, corners, cards) "
-        "alongside the pre-match odds, so it explains results after the whistle rather than "
-        "forecasting them. The bookmaker line is the honest pre-match benchmark."
+        "The bookmaker is the benchmark to beat: its odds already price in injuries, "
+        "line-ups and market money that the model never sees. Matching it from public "
+        "match history alone is the realistic goal."
     )
 
 # --- Model behaviour ---------------------------------------------------------
@@ -487,11 +513,14 @@ st.subheader("How it behaves")
 left, right = st.columns(2)
 with left, st.container(border=True):
     st.markdown("**Across the season**")
-    st.caption("Running accuracy as the season unfolds. A steady gap means the edge is not a fluke.")
-    st.altair_chart(season_chart(scored, model_name, palette), width="stretch")
+    st.caption("Running accuracy as the season unfolds, against the bookmaker favourite.")
+    st.altair_chart(season_chart(scored, MODEL_LABEL, palette), width="stretch")
 with right, st.container(border=True):
     st.markdown("**When it is confident, is it right?**")
-    st.caption("Bars: how often picks in each band were correct. Ticks: the confidence the model stated. Labels: matches.")
+    st.caption(
+        "Bars: how often picks in each band were correct. Ticks: the confidence the model "
+        "stated; ticks close to the bars mean well-calibrated probabilities. Labels: matches."
+    )
     st.altair_chart(confidence_chart(scored, palette), width="stretch")
 
 left, right = st.columns(2)
@@ -500,13 +529,14 @@ with left, st.container(border=True):
     draws_called = int((scored["Pick"] == "D").sum())
     st.caption(
         f"Rows are real results, columns are predictions. Draws are the blind spot: "
-        f"{int((y_true == 'D').sum())} happened, the model called {draws_called}."
+        f"{int((y_true == 'D').sum())} happened, the model called {draws_called}. "
+        "A draw is rarely the single most likely outcome, for bookmakers too."
     )
     st.altair_chart(confusion_chart(scored, palette), width="stretch")
 with right, st.container(border=True):
     st.markdown("**What drives the predictions**")
-    st.caption("Top ten features by how much shuffling each one hurts the holdout log-loss.")
-    st.altair_chart(importance_chart(feature_importance(model_name), palette), width="stretch")
+    st.caption("Top ten features by how much shuffling each one hurts the test-season log-loss.")
+    st.altair_chart(importance_chart(feature_importance(set_name), palette), width="stretch")
 
 # --- Match explorer ----------------------------------------------------------
 
@@ -572,17 +602,18 @@ with detail_col, st.container(border=True):
             f"**{match['Home']} {match['HomeGoals']}–{match['AwayGoals']} {match['Away']}**  \n"
             f"{match['Date']:%A %d %B %Y} · result: {LABEL_MAP[match['Result']]}"
         )
-        st.altair_chart(match_chart(match, model_name, palette), width="stretch")
+        st.altair_chart(match_chart(match, MODEL_LABEL, palette), width="stretch")
         verdict = "✓ model right" if match["Hit"] else "✗ model wrong"
         bookie_verdict = "✓ bookmaker right" if match["BookieHit"] else "✗ bookmaker wrong"
         st.caption(f"{verdict} · {bookie_verdict}")
     else:
         st.info("No matches for this filter.")
 
+slug = "form_elo_odds" if "odds" in set_name else "form_elo"
 st.download_button(
     "Download predictions (CSV)",
     table.to_csv(index=False).encode("utf-8"),
-    file_name=f"predictions_{test_season}_{model_name.lower().replace(' ', '_')}.csv",
+    file_name=f"predictions_{split['test'][0]}_{slug}.csv",
     mime="text/csv",
 )
 
@@ -594,15 +625,17 @@ with method:
     st.markdown("#### Method and limitations")
     st.markdown(
         f"""
-- **Task:** three-way classification (home win / draw / away win) with scikit-learn.
-- **Features ({len(MODEL_FEATURES)}):** shots, shots on target, corners, fouls and cards;
-  engineered home-minus-away differences and shot-accuracy ratios; Bet365 odds converted to
-  margin-free implied probabilities.
-- **Validation:** temporal holdout. Train on {train_label} ({len(train_df)} matches), score on
-  {test_label} ({len(test_df)} matches). A random split would leak later matches into training.
-- **Limitation:** match statistics are only known at full time, so this is an explanatory
-  model, not a betting or forecasting system. Draws are rarely predicted, a common weakness
-  of outcome classifiers.
+- **Task:** three-way classification (home win / draw / away win), scored on probabilities
+  (log-loss) as well as picks (accuracy).
+- **Features ({len(FEATURE_SETS[set_name])}):** Elo ratings updated after every result and carried
+  across seasons; each side's points, goals and shots on target over its last {FORM_WINDOW}
+  matches; rest days. The second feature set adds Bet365's margin-free implied probabilities.
+  Every value is computed from matches played *before* the one being predicted.
+- **Validation:** strictly chronological. {season_label(split['burn_in'][0])} warms up the
+  ratings, {train_label} trains ({report['rows']['train']:,} matches), {validation_label}
+  picks the algorithm and hyper-parameters, and {test_label} is scored once at the end.
+- **Limitations:** no line-ups, injuries or expected-goals data, which is where bookmakers
+  get their edge. Draws are almost never the top pick.
 
 Data: [Football-Data.co.uk](https://www.football-data.co.uk/englandm.php) ·
 Code: [GitHub](https://github.com/alemoscardo/ml-football-predictions)
@@ -628,4 +661,31 @@ with metrics_col:
             metric: st.column_config.NumberColumn(format="%.2f")
             for metric in ("Precision", "Recall", "F1")
         },
+    )
+    st.markdown(f"#### Model selection on {validation_label}")
+    trials = pd.DataFrame(
+        {
+            "Algorithm": [t["algorithm"] for t in spec["trials"]],
+            "Settings": [
+                ", ".join(f"{k}={v}" for k, v in t["params"].items()).replace(
+                    "min_samples_leaf", "min_leaf"
+                )
+                for t in spec["trials"]
+            ],
+            "Log-loss": [t["log_loss"] for t in spec["trials"]],
+        }
+    )
+    st.dataframe(
+        trials,
+        hide_index=True,
+        height=250,
+        column_config={
+            "Algorithm": st.column_config.TextColumn(width=130),
+            "Settings": st.column_config.TextColumn(width=165),
+            "Log-loss": st.column_config.NumberColumn(format="%.4f", width=70),
+        },
+    )
+    st.caption(
+        f"Every candidate fitted on {train_label} and scored on {validation_label}; "
+        "the top row is refitted on both and used above."
     )

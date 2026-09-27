@@ -1,3 +1,10 @@
+"""Pre-match features for Premier League outcome models.
+
+Every feature is computed only from information available before kick-off:
+team strength (Elo), recent form from earlier matches, rest days and the
+bookmaker's pre-match odds. Nothing from the match being predicted is used.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -10,112 +17,158 @@ RENAME_MAP = {
     "AS": "AwayShots",
     "HST": "HomeShotsTarget",
     "AST": "AwayShotsTarget",
-    "HC": "HomeCorners",
-    "AC": "AwayCorners",
-    "HF": "HomeFouls",
-    "AF": "AwayFouls",
-    "HY": "HomeYellows",
-    "AY": "AwayYellows",
-    "HR": "HomeReds",
-    "AR": "AwayReds",
     "FTR": "Result",
 }
 
-LEGACY_FEATURES = [
-    "HomeShots",
-    "AwayShots",
-    "HomeShotsTarget",
-    "AwayShotsTarget",
-    "HomeCorners",
-    "AwayCorners",
-    "HomeFouls",
-    "AwayFouls",
-    "HomeYellows",
-    "AwayYellows",
-    "HomeReds",
-    "AwayReds",
+FORM_WINDOW = 5
+
+# Elo: standard logistic scale, home advantage in rating points, and a pull
+# towards the mean between seasons so ratings do not drift.
+ELO_START = 1500.0
+ELO_NEW_TEAM = 1420.0  # promoted sides are, on average, weaker than the league
+ELO_K = 20.0
+ELO_HOME_ADVANTAGE = 60.0
+ELO_SEASON_REGRESSION = 0.2
+
+# Rolling per-team statistics, each averaged over the last FORM_WINDOW matches.
+ROLLING_STATS = ["Points", "GoalsFor", "GoalsAgainst", "ShotsTargetFor", "ShotsTargetAgainst"]
+
+TEAM_FEATURES = [
+    f"{side}{stat}"
+    for side in ("Home", "Away")
+    for stat in ["Elo", *[f"{s}L{FORM_WINDOW}" for s in ROLLING_STATS], "RestDays"]
 ]
 
-ENGINEERED_FEATURES = [
-    "ShotDiff",
-    "ShotTargetDiff",
-    "CornersDiff",
-    "FoulsDiff",
-    "YellowsDiff",
-    "RedsDiff",
-    "HomeShotAcc",
-    "AwayShotAcc",
-    "ShotAccDiff",
-    "AggressionDiff",
-]
+DIFF_FEATURES = ["EloDiff", "EloHomeWinProb", "FormPointsDiff", "GoalDiffDiff", "ShotsTargetDiffDiff"]
 
-ODDS_FEATURES = [
-    "B365H",
-    "B365D",
-    "B365A",
-    "NormProbHome_B365",
-    "NormProbDraw_B365",
-    "NormProbAway_B365",
-    "OddsEdgeHome_B365",
-]
+FORM_FEATURES = TEAM_FEATURES + DIFF_FEATURES
 
-MODEL_FEATURES = LEGACY_FEATURES + ENGINEERED_FEATURES + ODDS_FEATURES
+ODDS_FEATURES = ["NormProbHome_B365", "NormProbDraw_B365", "NormProbAway_B365"]
 
-REQUIRED_MATCH_STATS = LEGACY_FEATURES
-OPTIONAL_ODDS_COLUMNS = ["B365H", "B365D", "B365A"]
-
-
-def _ensure_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-    for column in columns:
-        if column not in df.columns:
-            df[column] = np.nan
-    return df
+FEATURE_SETS = {
+    "Form & Elo": FORM_FEATURES,
+    "Form, Elo & odds": FORM_FEATURES + ODDS_FEATURES,
+}
 
 
 def prepare_matches_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
-    df = raw_df.copy()
-    rename_subset = {k: v for k, v in RENAME_MAP.items() if k in df.columns}
-    if rename_subset:
-        df = df.rename(columns=rename_subset)
+    """Rename columns, parse dates, sort chronologically and add implied odds."""
+    df = raw_df.rename(columns={k: v for k, v in RENAME_MAP.items() if k in raw_df.columns})
+    df = df.dropna(subset=["Date", "HomeTeam", "AwayTeam"]).copy()
+    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, format="mixed")
+    df = df.sort_values("Date", kind="stable").reset_index(drop=True)
 
-    df = _ensure_columns(df, REQUIRED_MATCH_STATS + OPTIONAL_ODDS_COLUMNS)
-
-    df["ShotDiff"] = df["HomeShots"] - df["AwayShots"]
-    df["ShotTargetDiff"] = df["HomeShotsTarget"] - df["AwayShotsTarget"]
-    df["CornersDiff"] = df["HomeCorners"] - df["AwayCorners"]
-    df["FoulsDiff"] = df["HomeFouls"] - df["AwayFouls"]
-    df["YellowsDiff"] = df["HomeYellows"] - df["AwayYellows"]
-    df["RedsDiff"] = df["HomeReds"] - df["AwayReds"]
-
-    df["HomeShotAcc"] = df["HomeShotsTarget"] / df["HomeShots"].replace(0, np.nan)
-    df["AwayShotAcc"] = df["AwayShotsTarget"] / df["AwayShots"].replace(0, np.nan)
-    df["ShotAccDiff"] = df["HomeShotAcc"] - df["AwayShotAcc"]
-
-    df["AggressionDiff"] = (
-        df["HomeFouls"] + 2 * df["HomeYellows"] + 3 * df["HomeReds"]
-    ) - (df["AwayFouls"] + 2 * df["AwayYellows"] + 3 * df["AwayReds"])
-
-    df["ImpProbHome_B365"] = 1 / df["B365H"].replace(0, np.nan)
-    df["ImpProbDraw_B365"] = 1 / df["B365D"].replace(0, np.nan)
-    df["ImpProbAway_B365"] = 1 / df["B365A"].replace(0, np.nan)
-
-    implied_sum = df[
-        ["ImpProbHome_B365", "ImpProbDraw_B365", "ImpProbAway_B365"]
-    ].sum(axis=1)
-    df["NormProbHome_B365"] = df["ImpProbHome_B365"] / implied_sum
-    df["NormProbDraw_B365"] = df["ImpProbDraw_B365"] / implied_sum
-    df["NormProbAway_B365"] = df["ImpProbAway_B365"] / implied_sum
-
-    df["OddsEdgeHome_B365"] = df["B365A"] - df["B365H"]
-
+    implied = 1 / df[["B365H", "B365D", "B365A"]].replace(0, np.nan)
+    implied = implied.div(implied.sum(axis=1), axis=0)  # strip the bookmaker margin
+    df[ODDS_FEATURES] = implied.to_numpy()
     return df
 
 
-def build_feature_matrix(
-    raw_df: pd.DataFrame,
-    feature_list: list[str] | None = None,
-) -> pd.DataFrame:
-    features = MODEL_FEATURES if feature_list is None else feature_list
-    prepared = prepare_matches_dataframe(raw_df)
-    prepared = _ensure_columns(prepared, features)
-    return prepared[features]
+def add_elo(df: pd.DataFrame) -> pd.DataFrame:
+    """Pre-match Elo for both sides, updated after each result."""
+    ratings: dict[str, float] = {}
+    first_season = df["SeasonFile"].iloc[0]
+    season = None
+    home_elo, away_elo = [], []
+
+    for row in df.itertuples(index=False):
+        if row.SeasonFile != season:
+            season = row.SeasonFile
+            ratings = {
+                team: ELO_START + (1 - ELO_SEASON_REGRESSION) * (r - ELO_START)
+                for team, r in ratings.items()
+            }
+        newcomer = ELO_START if season == first_season else ELO_NEW_TEAM
+        home = ratings.get(row.HomeTeam, newcomer)
+        away = ratings.get(row.AwayTeam, newcomer)
+        home_elo.append(home)
+        away_elo.append(away)
+
+        if pd.isna(row.HomeGoals) or pd.isna(row.AwayGoals):
+            continue
+        expected = 1 / (1 + 10 ** ((away - home - ELO_HOME_ADVANTAGE) / 400))
+        actual = 1.0 if row.HomeGoals > row.AwayGoals else 0.5 if row.HomeGoals == row.AwayGoals else 0.0
+        margin = np.log1p(abs(row.HomeGoals - row.AwayGoals)) + 1
+        change = ELO_K * margin * (actual - expected)
+        ratings[row.HomeTeam] = home + change
+        ratings[row.AwayTeam] = away - change
+
+    df["HomeElo"] = home_elo
+    df["AwayElo"] = away_elo
+    df["EloDiff"] = df["HomeElo"] - df["AwayElo"]
+    df["EloHomeWinProb"] = 1 / (1 + 10 ** (-(df["EloDiff"] + ELO_HOME_ADVANTAGE) / 400))
+    return df
+
+
+def add_rolling_form(df: pd.DataFrame) -> pd.DataFrame:
+    """Each side's averages over its previous FORM_WINDOW league matches."""
+    home_points = np.select(
+        [df["HomeGoals"] > df["AwayGoals"], df["HomeGoals"] == df["AwayGoals"]], [3, 1], 0
+    ).astype(float)
+    away_points = np.select(
+        [df["AwayGoals"] > df["HomeGoals"], df["AwayGoals"] == df["HomeGoals"]], [3, 1], 0
+    ).astype(float)
+
+    long = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "Match": df.index,
+                    "Side": "Home",
+                    "Team": df["HomeTeam"],
+                    "Date": df["Date"],
+                    "Points": home_points,
+                    "GoalsFor": df["HomeGoals"],
+                    "GoalsAgainst": df["AwayGoals"],
+                    "ShotsTargetFor": df["HomeShotsTarget"],
+                    "ShotsTargetAgainst": df["AwayShotsTarget"],
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "Match": df.index,
+                    "Side": "Away",
+                    "Team": df["AwayTeam"],
+                    "Date": df["Date"],
+                    "Points": away_points,
+                    "GoalsFor": df["AwayGoals"],
+                    "GoalsAgainst": df["HomeGoals"],
+                    "ShotsTargetFor": df["AwayShotsTarget"],
+                    "ShotsTargetAgainst": df["HomeShotsTarget"],
+                }
+            ),
+        ]
+    ).sort_values(["Team", "Date", "Match"], kind="stable")
+
+    by_team = long.groupby("Team", sort=False)
+    for stat in ROLLING_STATS:
+        # shift(1) keeps the current match out of its own features.
+        long[f"{stat}L{FORM_WINDOW}"] = by_team[stat].transform(
+            lambda s: s.shift(1).rolling(FORM_WINDOW, min_periods=2).mean()
+        )
+    long["RestDays"] = by_team["Date"].diff().dt.days.clip(upper=30)
+
+    rolled = [f"{s}L{FORM_WINDOW}" for s in ROLLING_STATS] + ["RestDays"]
+    for side in ("Home", "Away"):
+        part = long[long["Side"] == side].set_index("Match")[rolled]
+        df[[f"{side}{c}" for c in rolled]] = part.reindex(df.index).to_numpy()
+
+    w = FORM_WINDOW
+    df["FormPointsDiff"] = df[f"HomePointsL{w}"] - df[f"AwayPointsL{w}"]
+    df["GoalDiffDiff"] = (df[f"HomeGoalsForL{w}"] - df[f"HomeGoalsAgainstL{w}"]) - (
+        df[f"AwayGoalsForL{w}"] - df[f"AwayGoalsAgainstL{w}"]
+    )
+    df["ShotsTargetDiffDiff"] = (
+        df[f"HomeShotsTargetForL{w}"] - df[f"HomeShotsTargetAgainstL{w}"]
+    ) - (df[f"AwayShotsTargetForL{w}"] - df[f"AwayShotsTargetAgainstL{w}"])
+    return df
+
+
+def build_features(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """All seasons in, one row per match out with every pre-match feature.
+
+    Needs the full chronological history: Elo and form carry across seasons.
+    """
+    df = prepare_matches_dataframe(raw_df)
+    df = add_elo(df)
+    return add_rolling_form(df)
