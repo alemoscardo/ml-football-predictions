@@ -11,10 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from feature_engineering import FEATURE_SETS, build_features  # noqa: E402
+from feature_engineering import MODEL_FEATURES, build_features  # noqa: E402
 from train_models import split_seasons  # noqa: E402
-
-ALL_FEATURES = sorted(set().union(*FEATURE_SETS.values()))
 
 
 def synthetic_season(season: str, start: str, rng: np.random.Generator) -> pd.DataFrame:
@@ -61,10 +59,10 @@ def test_changing_a_result_leaves_its_own_features_untouched(raw):
     changed = build_features(tampered)
 
     row = baseline.index[baseline["Date"] == pd.to_datetime(raw.loc[target, "Date"], dayfirst=True)][0]
-    before = baseline.loc[:row, ALL_FEATURES]
-    after = changed.loc[:row, ALL_FEATURES]
+    before = baseline.loc[:row, MODEL_FEATURES]
+    after = changed.loc[:row, MODEL_FEATURES]
     pd.testing.assert_frame_equal(before, after)  # this match and every earlier one
-    assert not baseline.loc[row + 1 :, ALL_FEATURES].equals(changed.loc[row + 1 :, ALL_FEATURES])
+    assert not baseline.loc[row + 1 :, MODEL_FEATURES].equals(changed.loc[row + 1 :, MODEL_FEATURES])
 
 
 def test_rolling_points_use_only_previous_matches(raw):

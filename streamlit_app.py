@@ -16,7 +16,7 @@ import streamlit as st
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import log_loss, precision_recall_fscore_support
 
-from feature_engineering import FEATURE_SETS, FORM_WINDOW, ODDS_FEATURES
+from feature_engineering import FORM_WINDOW, MODEL_FEATURES
 from train_models import METRICS_PATH, load_dataset, make_model, predict_sorted, split_seasons
 
 st.set_page_config(
@@ -63,28 +63,23 @@ FEATURE_LABELS = {
     "FormPointsDiff": f"Points-per-game gap, last {W}",
     "GoalDiffDiff": f"Goal-difference gap, last {W}",
     "ShotsTargetDiffDiff": f"Shots-on-target gap, last {W}",
-    "NormProbHome_B365": "Bookmaker P(home win)",
-    "NormProbDraw_B365": "Bookmaker P(draw)",
-    "NormProbAway_B365": "Bookmaker P(away win)",
 }
-FAMILIES = ["Team strength (Elo)", "Recent form & rest", "Bookmaker odds"]
+FAMILIES = ["Team strength (Elo)", "Recent form & rest"]
 
 
 def feature_family(feature: str) -> str:
-    if feature in ODDS_FEATURES:
-        return FAMILIES[2]
     return FAMILIES[0] if "Elo" in feature else FAMILIES[1]
 
 
 # Chart colours per theme. The model is the one highlighted series; benchmarks
-# stay neutral. Feature families use slots 1–3 of a CVD-validated palette.
+# stay neutral. Feature families use slots 1–2 of a CVD-validated palette.
 PALETTES = {
     "dark": {
         "accent": "#10B981",
         "neutral": "#5A6B85",
         "text": "#E6EAF3",
         "muted": "#8B98AD",
-        "families": ["#3987e5", "#d95926", "#199e70"],
+        "families": ["#3987e5", "#d95926"],
         "ramp": ["#0f2a22", "#10B981"],
     },
     "light": {
@@ -92,7 +87,7 @@ PALETTES = {
         "neutral": "#A3ACB9",
         "text": "#1F2937",
         "muted": "#6B7280",
-        "families": ["#2a78d6", "#eb6834", "#1baf7a"],
+        "families": ["#2a78d6", "#eb6834"],
         "ramp": ["#ecfdf5", "#047857"],
     },
 }
@@ -117,9 +112,9 @@ def load_report() -> dict:
     return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
 
 
-@st.cache_resource(show_spinner="Fitting the selected models…")
+@st.cache_resource(show_spinner="Fitting the selected model…")
 def load_experiment():
-    """Refit each feature set's chosen spec on train + validation seasons.
+    """Refit the chosen spec on the train + validation seasons.
 
     Fitting takes a few seconds, so the app does it in-process instead of
     unpickling artifacts — no dependency on the scikit-learn version that wrote them.
@@ -128,22 +123,19 @@ def load_experiment():
     split = split_seasons(matches)
     fit_df = matches[matches["SeasonFile"].isin(split["train"] + split["validation"])]
     test_df = matches[matches["SeasonFile"].isin(split["test"])].reset_index(drop=True)
-    report = load_report()
-    models = {}
-    for set_name, features in FEATURE_SETS.items():
-        spec = report["feature_sets"][set_name]
-        models[set_name] = make_model(spec["algorithm"], spec["params"]).fit(
-            fit_df[features], fit_df["Result"]
-        )
-    return fit_df, test_df, models, split
+    spec = load_report()["model"]
+    model = make_model(spec["algorithm"], spec["params"]).fit(
+        fit_df[MODEL_FEATURES], fit_df["Result"]
+    )
+    return fit_df, test_df, model, split
 
 
 @st.cache_data(show_spinner=False)
-def score_model(set_name: str) -> pd.DataFrame:
+def score_model() -> pd.DataFrame:
     """One row per test-season match: model and bookmaker probabilities, picks, hits."""
-    _, test_df, models, _ = load_experiment()
+    _, test_df, model, _ = load_experiment()
     proba = pd.DataFrame(
-        predict_sorted(models[set_name], test_df[FEATURE_SETS[set_name]]), columns=["A", "D", "H"]
+        predict_sorted(model, test_df[MODEL_FEATURES]), columns=["A", "D", "H"]
     )[CLASS_ORDER]
     bookie = pd.DataFrame({o: test_df[c] for o, c in BOOKIE_COLUMNS.items()})
 
@@ -170,12 +162,12 @@ def score_model(set_name: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Measuring feature importance…")
-def feature_importance(set_name: str) -> pd.DataFrame:
+def feature_importance() -> pd.DataFrame:
     """Permutation importance on the test season (increase in log-loss)."""
-    _, test_df, models, _ = load_experiment()
-    features = FEATURE_SETS[set_name]
+    _, test_df, model, _ = load_experiment()
+    features = MODEL_FEATURES
     result = permutation_importance(
-        models[set_name],
+        model,
         test_df[features],
         test_df["Result"],
         scoring="neg_log_loss",
@@ -437,27 +429,16 @@ test_label = season_label(split["test"][0])
 
 # --- Header ------------------------------------------------------------------
 
-head, picker = st.columns([3, 1], vertical_alignment="bottom")
-with head:
-    st.title("Premier League Outcome Model")
-    st.markdown(
-        f"Forecasts every {test_label} Premier League match **before kick-off**, using only "
-        f"what was known at the time. Trained on {train_label}, tuned on {validation_label}, "
-        f"scored once on **{test_label}**."
-    )
-with picker:
-    set_name = st.segmented_control(
-        "Features",
-        list(FEATURE_SETS),
-        default=list(FEATURE_SETS)[0],
-        required=True,
-        help="Form & Elo uses only public match history. The second set adds the "
-        "bookmaker's own probabilities as inputs.",
-    )
+spec = report["model"]
+st.title("Premier League Outcome Model")
+st.markdown(
+    f"Forecasts every {test_label} Premier League match **before kick-off**, using only "
+    f"public match history: Elo ratings and recent form, no bookmaker odds. Trained on "
+    f"{train_label}, tuned on {validation_label}, scored once on **{test_label}**."
+)
+st.caption(f"{spec['algorithm']} · picked by validation log-loss on {validation_label}")
 
-spec = report["feature_sets"][set_name]
-head.caption(f"{spec['algorithm']} · picked by validation log-loss on {validation_label}")
-scored = score_model(set_name)
+scored = score_model()
 y_true = scored["Result"]
 accuracy = scored["Hit"].mean()
 bookie_accuracy = scored["BookieHit"].mean()
@@ -495,7 +476,7 @@ benchmarks = pd.DataFrame(
         ("Random guess", 1 / 3, "Pick one of the three outcomes at random", False),
         ("Always back the home side", (y_true == "H").mean(), "Predict a home win every time", False),
         ("Bookmaker favourite", bookie_accuracy, "Pick the outcome with the shortest Bet365 odds", False),
-        (f"Model ({set_name})", accuracy, "This model, on the unseen season", True),
+        ("Model", accuracy, "This model, on the unseen season", True),
     ],
     columns=["Approach", "Accuracy", "How", "IsModel"],
 )
@@ -536,7 +517,7 @@ with left, st.container(border=True):
 with right, st.container(border=True):
     st.markdown("**What drives the predictions**")
     st.caption("Top ten features by how much shuffling each one hurts the test-season log-loss.")
-    st.altair_chart(importance_chart(feature_importance(set_name), palette), width="stretch")
+    st.altair_chart(importance_chart(feature_importance(), palette), width="stretch")
 
 # --- Match explorer ----------------------------------------------------------
 
@@ -609,11 +590,10 @@ with detail_col, st.container(border=True):
     else:
         st.info("No matches for this filter.")
 
-slug = "form_elo_odds" if "odds" in set_name else "form_elo"
 st.download_button(
     "Download predictions (CSV)",
     table.to_csv(index=False).encode("utf-8"),
-    file_name=f"predictions_{split['test'][0]}_{slug}.csv",
+    file_name=f"predictions_{split['test'][0]}.csv",
     mime="text/csv",
 )
 
@@ -627,10 +607,10 @@ with method:
         f"""
 - **Task:** three-way classification (home win / draw / away win), scored on probabilities
   (log-loss) as well as picks (accuracy).
-- **Features ({len(FEATURE_SETS[set_name])}):** Elo ratings updated after every result and carried
+- **Features ({len(MODEL_FEATURES)}):** Elo ratings updated after every result and carried
   across seasons; each side's points, goals and shots on target over its last {FORM_WINDOW}
-  matches; rest days. The second feature set adds Bet365's margin-free implied probabilities.
-  Every value is computed from matches played *before* the one being predicted.
+  matches; rest days. Every value is computed from matches played *before* the one being
+  predicted. Bet365 odds are used only as the benchmark, never as inputs.
 - **Validation:** strictly chronological. {season_label(split['burn_in'][0])} warms up the
   ratings, {train_label} trains ({report['rows']['train']:,} matches), {validation_label}
   picks the algorithm and hyper-parameters, and {test_label} is scored once at the end.

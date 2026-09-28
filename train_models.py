@@ -6,8 +6,8 @@ Seasons are split in time:
 - the second-to-last season is the validation set used to pick the model,
 - the last season is the untouched test set, scored once at the end.
 
-Writes ``models/model_metrics.json``: the chosen model spec per feature set,
-every validation trial, and the test-season scores next to the bookmaker's.
+Writes ``models/model_metrics.json``: the chosen model spec, every validation
+trial, and the test-season scores next to the bookmaker's.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from feature_engineering import FEATURE_SETS, build_features
+from feature_engineering import MODEL_FEATURES, build_features
 
 DATA_DIR = Path("data")
 MODELS_DIR = Path("models")
@@ -137,24 +137,22 @@ def main() -> None:
             "validation": score(validation["Result"], validation[BOOKIE_COLUMNS].to_numpy()),
             "test": score(test["Result"], test[BOOKIE_COLUMNS].to_numpy()),
         },
-        "feature_sets": {},
     }
 
-    for set_name, features in FEATURE_SETS.items():
-        trials = tune(train, validation, features)
-        best = trials[0]
-        # Refit the chosen spec on train + validation, then score the test season once.
-        model = make_model(best["algorithm"], best["params"]).fit(
-            final_train[features], final_train["Result"]
-        )
-        report["feature_sets"][set_name] = {
-            "features": features,
-            "algorithm": best["algorithm"],
-            "params": best["params"],
-            "validation": {k: best[k] for k in ("accuracy", "log_loss")},
-            "test": score(test["Result"], predict_sorted(model, test[features])),
-            "trials": trials,
-        }
+    trials = tune(train, validation, MODEL_FEATURES)
+    best = trials[0]
+    # Refit the chosen spec on train + validation, then score the test season once.
+    model = make_model(best["algorithm"], best["params"]).fit(
+        final_train[MODEL_FEATURES], final_train["Result"]
+    )
+    report["model"] = {
+        "features": MODEL_FEATURES,
+        "algorithm": best["algorithm"],
+        "params": best["params"],
+        "validation": {k: best[k] for k in ("accuracy", "log_loss")},
+        "test": score(test["Result"], predict_sorted(model, test[MODEL_FEATURES])),
+        "trials": trials,
+    }
 
     MODELS_DIR.mkdir(exist_ok=True)
     METRICS_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -162,9 +160,9 @@ def main() -> None:
     bookie = report["bookmaker"]["test"]
     print(f"Train {', '.join(split['train'])} | validate {split['validation'][0]} | test {split['test'][0]}")
     print(f"  {'Bookmaker favourite':34s} acc {bookie['accuracy']:.3f}  log-loss {bookie['log_loss']:.4f}")
-    for set_name, entry in report["feature_sets"].items():
-        label = f"{set_name} ({entry['algorithm']})"
-        print(f"  {label:34s} acc {entry['test']['accuracy']:.3f}  log-loss {entry['test']['log_loss']:.4f}")
+    entry = report["model"]
+    label = f"Model ({entry['algorithm']})"
+    print(f"  {label:34s} acc {entry['test']['accuracy']:.3f}  log-loss {entry['test']['log_loss']:.4f}")
     print(f"Saved {METRICS_PATH}")
 
 

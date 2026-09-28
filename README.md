@@ -18,13 +18,10 @@ Test season **2025/26** (380 matches), scored once after model selection on 2024
 | Random guess | 33.3% | 1.099 |
 | Always back the home side | 42.6% | — |
 | **Bookmaker favourite (Bet365)** | **48.9%** | **1.019** |
-| Model: Form & Elo (logistic regression) | 48.2% | 1.027 |
-| Model: Form, Elo & odds (logistic regression) | 47.6% | 1.026 |
+| **Model: Elo + recent form (logistic regression)** | **48.2%** | **1.027** |
 
-Built only from public match history, the model gets within 0.01 log-loss of the bookmaker,
-whose odds also price in line-ups, injuries and market money. Adding the bookmaker's own
-probabilities as features barely moves the score: the market already knows what the form
-features know.
+Built only from public match history, with no odds as inputs, the model gets within 0.01
+log-loss of the bookmaker, whose odds also price in line-ups, injuries and market money.
 
 ## How it works
 
@@ -35,7 +32,9 @@ being predicted:
 - **Recent form**: points, goals scored and conceded, shots on target for and against over each
   side's last 5 league matches, plus the home-minus-away gaps
 - **Rest days** since each side's previous match
-- *Optional*: Bet365 odds converted to margin-free implied probabilities
+
+Bet365 odds are never model inputs: they are converted to margin-free probabilities and used
+only as the benchmark.
 
 **Validation** (`train_models.py`) is strictly chronological:
 

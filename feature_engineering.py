@@ -1,8 +1,9 @@
 """Pre-match features for Premier League outcome models.
 
 Every feature is computed only from information available before kick-off:
-team strength (Elo), recent form from earlier matches, rest days and the
-bookmaker's pre-match odds. Nothing from the match being predicted is used.
+team strength (Elo), recent form from earlier matches and rest days. Nothing
+from the match being predicted is used. Bookmaker odds are turned into implied
+probabilities for the benchmark only; they are not model inputs.
 """
 
 from __future__ import annotations
@@ -41,14 +42,10 @@ TEAM_FEATURES = [
 
 DIFF_FEATURES = ["EloDiff", "EloHomeWinProb", "FormPointsDiff", "GoalDiffDiff", "ShotsTargetDiffDiff"]
 
-FORM_FEATURES = TEAM_FEATURES + DIFF_FEATURES
+MODEL_FEATURES = TEAM_FEATURES + DIFF_FEATURES
 
-ODDS_FEATURES = ["NormProbHome_B365", "NormProbDraw_B365", "NormProbAway_B365"]
-
-FEATURE_SETS = {
-    "Form & Elo": FORM_FEATURES,
-    "Form, Elo & odds": FORM_FEATURES + ODDS_FEATURES,
-}
+# Bookmaker benchmark only, never fed to the model.
+BOOKMAKER_PROBS = ["NormProbHome_B365", "NormProbDraw_B365", "NormProbAway_B365"]
 
 
 def prepare_matches_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -60,7 +57,7 @@ def prepare_matches_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     implied = 1 / df[["B365H", "B365D", "B365A"]].replace(0, np.nan)
     implied = implied.div(implied.sum(axis=1), axis=0)  # strip the bookmaker margin
-    df[ODDS_FEATURES] = implied.to_numpy()
+    df[BOOKMAKER_PROBS] = implied.to_numpy()
     return df
 
 

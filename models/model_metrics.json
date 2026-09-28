@@ -37,255 +37,127 @@
       "log_loss": 1.0185474335944442
     }
   },
-  "feature_sets": {
-    "Form & Elo": {
-      "features": [
-        "HomeElo",
-        "HomePointsL5",
-        "HomeGoalsForL5",
-        "HomeGoalsAgainstL5",
-        "HomeShotsTargetForL5",
-        "HomeShotsTargetAgainstL5",
-        "HomeRestDays",
-        "AwayElo",
-        "AwayPointsL5",
-        "AwayGoalsForL5",
-        "AwayGoalsAgainstL5",
-        "AwayShotsTargetForL5",
-        "AwayShotsTargetAgainstL5",
-        "AwayRestDays",
-        "EloDiff",
-        "EloHomeWinProb",
-        "FormPointsDiff",
-        "GoalDiffDiff",
-        "ShotsTargetDiffDiff"
-      ],
-      "algorithm": "Logistic Regression",
-      "params": {
-        "C": 0.01
-      },
-      "validation": {
+  "model": {
+    "features": [
+      "HomeElo",
+      "HomePointsL5",
+      "HomeGoalsForL5",
+      "HomeGoalsAgainstL5",
+      "HomeShotsTargetForL5",
+      "HomeShotsTargetAgainstL5",
+      "HomeRestDays",
+      "AwayElo",
+      "AwayPointsL5",
+      "AwayGoalsForL5",
+      "AwayGoalsAgainstL5",
+      "AwayShotsTargetForL5",
+      "AwayShotsTargetAgainstL5",
+      "AwayRestDays",
+      "EloDiff",
+      "EloHomeWinProb",
+      "FormPointsDiff",
+      "GoalDiffDiff",
+      "ShotsTargetDiffDiff"
+    ],
+    "algorithm": "Logistic Regression",
+    "params": {
+      "C": 0.01
+    },
+    "validation": {
+      "accuracy": 0.5394736842105263,
+      "log_loss": 0.9792916769742446
+    },
+    "test": {
+      "accuracy": 0.48157894736842105,
+      "log_loss": 1.027290110742242
+    },
+    "trials": [
+      {
+        "algorithm": "Logistic Regression",
+        "params": {
+          "C": 0.01
+        },
         "accuracy": 0.5394736842105263,
         "log_loss": 0.9792916769742446
       },
-      "test": {
-        "accuracy": 0.48157894736842105,
-        "log_loss": 1.027290110742242
-      },
-      "trials": [
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 0.01
-          },
-          "accuracy": 0.5394736842105263,
-          "log_loss": 0.9792916769742446
+      {
+        "algorithm": "Logistic Regression",
+        "params": {
+          "C": 0.05
         },
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 0.05
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 0.9793519199098748
-        },
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 0.2
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 0.9796280743595401
-        },
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 1.0
-          },
-          "accuracy": 0.5368421052631579,
-          "log_loss": 0.979967706032942
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 8,
-            "min_samples_leaf": 20
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 0.9940773368713768
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 6,
-            "min_samples_leaf": 20
-          },
-          "accuracy": 0.5421052631578948,
-          "log_loss": 0.9960481845563097
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 8,
-            "min_samples_leaf": 50
-          },
-          "accuracy": 0.5447368421052632,
-          "log_loss": 0.998026105506016
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 6,
-            "min_samples_leaf": 50
-          },
-          "accuracy": 0.5447368421052632,
-          "log_loss": 0.999002683330477
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 4,
-            "min_samples_leaf": 20
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 1.0027735024625626
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 4,
-            "min_samples_leaf": 50
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 1.0041013174372444
-        }
-      ]
-    },
-    "Form, Elo & odds": {
-      "features": [
-        "HomeElo",
-        "HomePointsL5",
-        "HomeGoalsForL5",
-        "HomeGoalsAgainstL5",
-        "HomeShotsTargetForL5",
-        "HomeShotsTargetAgainstL5",
-        "HomeRestDays",
-        "AwayElo",
-        "AwayPointsL5",
-        "AwayGoalsForL5",
-        "AwayGoalsAgainstL5",
-        "AwayShotsTargetForL5",
-        "AwayShotsTargetAgainstL5",
-        "AwayRestDays",
-        "EloDiff",
-        "EloHomeWinProb",
-        "FormPointsDiff",
-        "GoalDiffDiff",
-        "ShotsTargetDiffDiff",
-        "NormProbHome_B365",
-        "NormProbDraw_B365",
-        "NormProbAway_B365"
-      ],
-      "algorithm": "Logistic Regression",
-      "params": {
-        "C": 0.05
-      },
-      "validation": {
         "accuracy": 0.5342105263157895,
-        "log_loss": 0.9716721090537904
+        "log_loss": 0.9793519199098748
       },
-      "test": {
-        "accuracy": 0.4763157894736842,
-        "log_loss": 1.0259102679335959
+      {
+        "algorithm": "Logistic Regression",
+        "params": {
+          "C": 0.2
+        },
+        "accuracy": 0.5342105263157895,
+        "log_loss": 0.9796280743595401
       },
-      "trials": [
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 0.05
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 0.9716721090537904
+      {
+        "algorithm": "Logistic Regression",
+        "params": {
+          "C": 1.0
         },
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 0.2
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 0.9717914862339677
+        "accuracy": 0.5368421052631579,
+        "log_loss": 0.979967706032942
+      },
+      {
+        "algorithm": "Extra Trees",
+        "params": {
+          "max_depth": 8,
+          "min_samples_leaf": 20
         },
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 1.0
-          },
-          "accuracy": 0.5342105263157895,
-          "log_loss": 0.9719806449821342
+        "accuracy": 0.5342105263157895,
+        "log_loss": 0.9940773368713768
+      },
+      {
+        "algorithm": "Extra Trees",
+        "params": {
+          "max_depth": 6,
+          "min_samples_leaf": 20
         },
-        {
-          "algorithm": "Logistic Regression",
-          "params": {
-            "C": 0.01
-          },
-          "accuracy": 0.5394736842105263,
-          "log_loss": 0.9721171588895453
+        "accuracy": 0.5421052631578948,
+        "log_loss": 0.99604818455631
+      },
+      {
+        "algorithm": "Extra Trees",
+        "params": {
+          "max_depth": 8,
+          "min_samples_leaf": 50
         },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 8,
-            "min_samples_leaf": 20
-          },
-          "accuracy": 0.5368421052631579,
-          "log_loss": 0.9793504144900891
+        "accuracy": 0.5447368421052632,
+        "log_loss": 0.998026105506016
+      },
+      {
+        "algorithm": "Extra Trees",
+        "params": {
+          "max_depth": 6,
+          "min_samples_leaf": 50
         },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 6,
-            "min_samples_leaf": 20
-          },
-          "accuracy": 0.5289473684210526,
-          "log_loss": 0.9824471830142942
+        "accuracy": 0.5447368421052632,
+        "log_loss": 0.999002683330477
+      },
+      {
+        "algorithm": "Extra Trees",
+        "params": {
+          "max_depth": 4,
+          "min_samples_leaf": 20
         },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 8,
-            "min_samples_leaf": 50
-          },
-          "accuracy": 0.531578947368421,
-          "log_loss": 0.9831424067894726
+        "accuracy": 0.5342105263157895,
+        "log_loss": 1.0027735024625626
+      },
+      {
+        "algorithm": "Extra Trees",
+        "params": {
+          "max_depth": 4,
+          "min_samples_leaf": 50
         },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 6,
-            "min_samples_leaf": 50
-          },
-          "accuracy": 0.5263157894736842,
-          "log_loss": 0.9838342643755889
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 4,
-            "min_samples_leaf": 20
-          },
-          "accuracy": 0.5236842105263158,
-          "log_loss": 0.9872094841179989
-        },
-        {
-          "algorithm": "Extra Trees",
-          "params": {
-            "max_depth": 4,
-            "min_samples_leaf": 50
-          },
-          "accuracy": 0.5263157894736842,
-          "log_loss": 0.9890557220476509
-        }
-      ]
-    }
+        "accuracy": 0.5342105263157895,
+        "log_loss": 1.0041013174372446
+      }
+    ]
   }
 }
