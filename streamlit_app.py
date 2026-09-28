@@ -106,9 +106,12 @@ def season_span(stems: list[str]) -> str:
 # --- Data & models -----------------------------------------------------------
 
 
-@st.cache_data(show_spinner=False)
 def load_report() -> dict:
-    """Model selection and scores written by ``train_models.py``."""
+    """Model selection and scores written by ``train_models.py``.
+
+    Not cached: the file is tiny, and a cache keyed on this function's source would
+    keep serving a stale report after ``train_models.py`` rewrites it.
+    """
     return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
 
 
