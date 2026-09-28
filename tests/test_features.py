@@ -46,7 +46,10 @@ def synthetic_season(season: str, start: str, rng: np.random.Generator) -> pd.Da
 def raw() -> pd.DataFrame:
     rng = np.random.default_rng(0)
     return pd.concat(
-        [synthetic_season("E0_2324", "2023-08-12", rng), synthetic_season("E0_2425", "2024-08-10", rng)],
+        [
+            synthetic_season("E0_2324", "2023-08-12", rng),
+            synthetic_season("E0_2425", "2024-08-10", rng),
+        ],
         ignore_index=True,
     )
 
@@ -58,11 +61,15 @@ def test_changing_a_result_leaves_its_own_features_untouched(raw):
     tampered.loc[target, ["FTHG", "FTAG", "FTR", "HST", "AST"]] = [9, 0, "H", 20, 0]
     changed = build_features(tampered)
 
-    row = baseline.index[baseline["Date"] == pd.to_datetime(raw.loc[target, "Date"], dayfirst=True)][0]
+    row = baseline.index[
+        baseline["Date"] == pd.to_datetime(raw.loc[target, "Date"], dayfirst=True)
+    ][0]
     before = baseline.loc[:row, MODEL_FEATURES]
     after = changed.loc[:row, MODEL_FEATURES]
     pd.testing.assert_frame_equal(before, after)  # this match and every earlier one
-    assert not baseline.loc[row + 1 :, MODEL_FEATURES].equals(changed.loc[row + 1 :, MODEL_FEATURES])
+    assert not baseline.loc[row + 1 :, MODEL_FEATURES].equals(
+        changed.loc[row + 1 :, MODEL_FEATURES]
+    )
 
 
 def test_rolling_points_use_only_previous_matches(raw):
@@ -72,7 +79,9 @@ def test_rolling_points_use_only_previous_matches(raw):
     is_home = games.HomeTeam == team
     scored = np.where(is_home, games.HomeGoals, games.AwayGoals)
     conceded = np.where(is_home, games.AwayGoals, games.HomeGoals)
-    points = pd.Series(np.select([scored > conceded, scored == conceded], [3, 1], 0), index=games.index)
+    points = pd.Series(
+        np.select([scored > conceded, scored == conceded], [3, 1], 0), index=games.index
+    )
     expected = points.shift(1).rolling(5, min_periods=2).mean()
     actual = np.where(is_home, games.HomePointsL5, games.AwayPointsL5)
     np.testing.assert_allclose(actual, expected, equal_nan=True)
@@ -85,7 +94,9 @@ def test_implied_probabilities_sum_to_one(raw):
 
 
 def test_season_split_is_chronological():
-    seasons = pd.DataFrame({"SeasonFile": [f"E0_{y % 100:02d}{(y + 1) % 100:02d}" for y in range(2018, 2024)]})
+    seasons = pd.DataFrame(
+        {"SeasonFile": [f"E0_{y % 100:02d}{(y + 1) % 100:02d}" for y in range(2018, 2024)]}
+    )
     split = split_seasons(seasons)
     order = split["burn_in"] + split["train"] + split["validation"] + split["test"]
     assert order == sorted(seasons["SeasonFile"])

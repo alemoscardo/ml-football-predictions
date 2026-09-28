@@ -40,12 +40,18 @@ TEAM_FEATURES = [
     for stat in ["Elo", *[f"{s}L{FORM_WINDOW}" for s in ROLLING_STATS], "RestDays"]
 ]
 
-DIFF_FEATURES = ["EloDiff", "EloHomeWinProb", "FormPointsDiff", "GoalDiffDiff", "ShotsTargetDiffDiff"]
+DIFF_FEATURES = [
+    "EloDiff",
+    "EloHomeWinProb",
+    "FormPointsDiff",
+    "GoalDiffDiff",
+    "ShotsTargetDiffDiff",
+]
 
 MODEL_FEATURES = TEAM_FEATURES + DIFF_FEATURES
 
-# Bookmaker benchmark only, never fed to the model.
-BOOKMAKER_PROBS = ["NormProbHome_B365", "NormProbDraw_B365", "NormProbAway_B365"]
+# Bookmaker benchmark only, never fed to the model. Outcome code → column.
+BOOKMAKER_PROBS = {"H": "NormProbHome_B365", "D": "NormProbDraw_B365", "A": "NormProbAway_B365"}
 
 
 def prepare_matches_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -57,7 +63,7 @@ def prepare_matches_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     implied = 1 / df[["B365H", "B365D", "B365A"]].replace(0, np.nan)
     implied = implied.div(implied.sum(axis=1), axis=0)  # strip the bookmaker margin
-    df[BOOKMAKER_PROBS] = implied.to_numpy()
+    df[list(BOOKMAKER_PROBS.values())] = implied.to_numpy()
     return df
 
 
@@ -84,7 +90,10 @@ def add_elo(df: pd.DataFrame) -> pd.DataFrame:
         if pd.isna(row.HomeGoals) or pd.isna(row.AwayGoals):
             continue
         expected = 1 / (1 + 10 ** ((away - home - ELO_HOME_ADVANTAGE) / 400))
-        actual = 1.0 if row.HomeGoals > row.AwayGoals else 0.5 if row.HomeGoals == row.AwayGoals else 0.0
+        if row.HomeGoals == row.AwayGoals:
+            actual = 0.5
+        else:
+            actual = 1.0 if row.HomeGoals > row.AwayGoals else 0.0
         margin = np.log1p(abs(row.HomeGoals - row.AwayGoals)) + 1
         change = ELO_K * margin * (actual - expected)
         ratings[row.HomeTeam] = home + change

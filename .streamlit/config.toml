@@ -1,6 +1,6 @@
-# No `base` is set, so the app defaults to the viewer's system light/dark
-# setting; the in-app "Dark theme" toggle overrides it and persists per browser.
-# Only the accent colour is customised, per mode.
+# No `base` is set, so the app follows the viewer's system light/dark setting
+# (switchable from Streamlit's own ⋮ → Settings menu). Only the accent colour is
+# customised, per mode.
 [theme]
 primaryColor = "#10B981"
 

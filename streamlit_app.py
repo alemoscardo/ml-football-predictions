@@ -7,6 +7,7 @@ random guessing, always backing the home side, and the bookmaker favourite.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import altair as alt
@@ -16,8 +17,15 @@ import streamlit as st
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import log_loss, precision_recall_fscore_support
 
-from feature_engineering import FORM_WINDOW, MODEL_FEATURES
-from train_models import METRICS_PATH, load_dataset, make_model, predict_sorted, split_seasons
+from feature_engineering import BOOKMAKER_PROBS, FORM_WINDOW, MODEL_FEATURES
+from train_models import (
+    DATA_DIR,
+    METRICS_PATH,
+    load_dataset,
+    make_model,
+    predict_sorted,
+    split_seasons,
+)
 
 st.set_page_config(
     page_title="EPL Outcome Model",
@@ -39,7 +47,6 @@ st.markdown(
 
 CLASS_ORDER = ["H", "D", "A"]
 LABEL_MAP = {"H": "Home win", "D": "Draw", "A": "Away win"}
-BOOKIE_COLUMNS = {"H": "NormProbHome_B365", "D": "NormProbDraw_B365", "A": "NormProbAway_B365"}
 
 W = FORM_WINDOW
 FEATURE_LABELS = {
@@ -100,7 +107,8 @@ def season_label(stem: str) -> str:
 
 
 def season_span(stems: list[str]) -> str:
-    return season_label(stems[0]) if len(stems) == 1 else f"{season_label(stems[0])} – {season_label(stems[-1])}"
+    first, last = season_label(stems[0]), season_label(stems[-1])
+    return first if first == last else f"{first} – {last}"
 
 
 # --- Data & models -----------------------------------------------------------
@@ -115,8 +123,21 @@ def load_report() -> dict:
     return json.loads(METRICS_PATH.read_text(encoding="utf-8"))
 
 
+def inputs_fingerprint() -> str:
+    """Hash of the model report and every season file.
+
+    Passed to the cached functions below so a retrain or a new season invalidates
+    them; Streamlit otherwise keys caches on the function's code alone.
+    """
+    digest = hashlib.sha256(METRICS_PATH.read_bytes())
+    for path in sorted(DATA_DIR.glob("E0_*.csv")):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 @st.cache_resource(show_spinner="Fitting the selected model…")
-def load_experiment():
+def load_experiment(fingerprint: str):
     """Refit the chosen spec on the train + validation seasons.
 
     Fitting takes a few seconds, so the app does it in-process instead of
@@ -134,13 +155,13 @@ def load_experiment():
 
 
 @st.cache_data(show_spinner=False)
-def score_model() -> pd.DataFrame:
+def score_model(fingerprint: str) -> pd.DataFrame:
     """One row per test-season match: model and bookmaker probabilities, picks, hits."""
-    _, test_df, model, _ = load_experiment()
-    proba = pd.DataFrame(
-        predict_sorted(model, test_df[MODEL_FEATURES]), columns=["A", "D", "H"]
-    )[CLASS_ORDER]
-    bookie = pd.DataFrame({o: test_df[c] for o, c in BOOKIE_COLUMNS.items()})
+    _, test_df, model, _ = load_experiment(fingerprint)
+    proba = pd.DataFrame(predict_sorted(model, test_df[MODEL_FEATURES]), columns=["A", "D", "H"])[
+        CLASS_ORDER
+    ]
+    bookie = pd.DataFrame({o: test_df[BOOKMAKER_PROBS[o]] for o in CLASS_ORDER})
 
     scored = pd.DataFrame(
         {
@@ -165,9 +186,9 @@ def score_model() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Measuring feature importance…")
-def feature_importance() -> pd.DataFrame:
+def feature_importance(fingerprint: str) -> pd.DataFrame:
     """Permutation importance on the test season (increase in log-loss)."""
-    _, test_df, model, _ = load_experiment()
+    _, test_df, model, _ = load_experiment(fingerprint)
     features = MODEL_FEATURES
     result = permutation_importance(
         model,
@@ -222,9 +243,7 @@ def benchmark_chart(rows: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     )
     labels = base.mark_text(
         align="left", dx=6, fontSize=13, fontWeight=600, color=palette["text"]
-    ).encode(
-        text=alt.Text("Accuracy:Q", format=".1%")
-    )
+    ).encode(text=alt.Text("Accuracy:Q", format=".1%"))
     return (bars + labels).properties(height=210)
 
 
@@ -325,7 +344,10 @@ def confusion_chart(scored: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     counts = counts.reindex(index=labels, columns=labels, fill_value=0)
     share = counts.div(counts.sum(axis=1), axis=0)
     cells = (
-        counts.stack().rename("Count").to_frame().join(share.stack().rename("Share"))
+        counts.stack()
+        .rename("Count")
+        .to_frame()
+        .join(share.stack().rename("Share"))
         .reset_index(names=["Actual", "Predicted"])
     )
     base = alt.Chart(cells).encode(
@@ -363,7 +385,9 @@ def importance_chart(importance: pd.DataFrame, palette: dict[str, str]) -> alt.C
             title=None,
             axis=alt.Axis(labelLimit=220, labelOverlap=False, labelFontSize=12),
         ),
-        x=alt.X("Importance:Q", title="Increase in log-loss when shuffled", axis=alt.Axis(tickCount=4)),
+        x=alt.X(
+            "Importance:Q", title="Increase in log-loss when shuffled", axis=alt.Axis(tickCount=4)
+        ),
         tooltip=[
             "Feature:N",
             "Family:N",
@@ -398,13 +422,17 @@ def match_chart(match: pd.Series, model_name: str, palette: dict[str, str]) -> a
     base = alt.Chart(rows).encode(
         y=alt.Y("Outcome:N", sort=labels, title=None),
         yOffset=alt.YOffset("Source:N", sort=[model_name, "Bookmaker"]),
-        x=alt.X("Probability:Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%"), title=None),
+        x=alt.X(
+            "Probability:Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%"), title=None
+        ),
         tooltip=["Outcome:N", "Source:N", alt.Tooltip("Probability:Q", format=".0%")],
     )
     bars = base.mark_bar(cornerRadiusEnd=4, height=12).encode(
         color=alt.Color(
             "Source:N",
-            scale=alt.Scale(domain=[model_name, "Bookmaker"], range=[palette["accent"], palette["neutral"]]),
+            scale=alt.Scale(
+                domain=[model_name, "Bookmaker"], range=[palette["accent"], palette["neutral"]]
+            ),
             legend=alt.Legend(orient="top", title=None),
         )
     )
@@ -420,13 +448,15 @@ MODEL_LABEL = "Model"
 
 try:
     report = load_report()
-    fit_df, _, _, split = load_experiment()
+    fingerprint = inputs_fingerprint()
+    fit_df, _, _, split = load_experiment(fingerprint)
 except Exception as exc:
     st.error(f"Unable to fit the models: {exc}")
     st.stop()
 
 palette = PALETTES.get(st.context.theme.type or "dark", PALETTES["dark"])
 train_label = season_span(split["train"])
+fit_label = season_span(split["train"] + split["validation"])
 validation_label = season_label(split["validation"][0])
 test_label = season_label(split["test"][0])
 
@@ -436,12 +466,15 @@ spec = report["model"]
 st.title("Premier League Outcome Model")
 st.markdown(
     f"Forecasts every {test_label} Premier League match **before kick-off**, using only "
-    f"public match history: Elo ratings and recent form, no bookmaker odds. Trained on "
-    f"{train_label}, tuned on {validation_label}, scored once on **{test_label}**."
+    f"public match history: Elo ratings and recent form, no bookmaker odds. Fitted on "
+    f"{fit_label} and scored once on **{test_label}**, a season it never saw."
 )
-st.caption(f"{spec['algorithm']} · picked by validation log-loss on {validation_label}")
+st.caption(
+    f"{spec['algorithm']} · chosen by training on {train_label} and comparing candidates "
+    f"on {validation_label}, then refitted on both"
+)
 
-scored = score_model()
+scored = score_model(fingerprint)
 y_true = scored["Result"]
 accuracy = scored["Hit"].mean()
 bookie_accuracy = scored["BookieHit"].mean()
@@ -469,7 +502,13 @@ k2.metric(
 k3.metric(
     "Called correctly", f"{int(scored['Hit'].sum())} / {len(scored)}", border=True, height="stretch"
 )
-k4.metric("Training matches", f"{len(fit_df):,}", border=True, height="stretch")
+k4.metric(
+    "Matches fitted on",
+    f"{len(fit_df):,}",
+    help=f"{fit_label}: the training seasons plus the validation season.",
+    border=True,
+    height="stretch",
+)
 
 # --- Benchmarks --------------------------------------------------------------
 
@@ -477,8 +516,8 @@ st.subheader("How it compares")
 benchmarks = pd.DataFrame(
     [
         ("Random guess", 1 / 3, "Pick one of the three outcomes at random", False),
-        ("Always back the home side", (y_true == "H").mean(), "Predict a home win every time", False),
-        ("Bookmaker favourite", bookie_accuracy, "Pick the outcome with the shortest Bet365 odds", False),
+        ("Always back the home side", (y_true == "H").mean(), "Home win every time", False),
+        ("Bookmaker favourite", bookie_accuracy, "Shortest Bet365 odds", False),
         ("Model", accuracy, "This model, on the unseen season", True),
     ],
     columns=["Approach", "Accuracy", "How", "IsModel"],
@@ -520,7 +559,7 @@ with left, st.container(border=True):
 with right, st.container(border=True):
     st.markdown("**What drives the predictions**")
     st.caption("Top ten features by how much shuffling each one hurts the test-season log-loss.")
-    st.altair_chart(importance_chart(feature_importance(), palette), width="stretch")
+    st.altair_chart(importance_chart(feature_importance(fingerprint), palette), width="stretch")
 
 # --- Match explorer ----------------------------------------------------------
 
@@ -614,9 +653,10 @@ with method:
   across seasons; each side's points, goals and shots on target over its last {FORM_WINDOW}
   matches; rest days. Every value is computed from matches played *before* the one being
   predicted. Bet365 odds are used only as the benchmark, never as inputs.
-- **Validation:** strictly chronological. {season_label(split['burn_in'][0])} warms up the
-  ratings, {train_label} trains ({report['rows']['train']:,} matches), {validation_label}
-  picks the algorithm and hyper-parameters, and {test_label} is scored once at the end.
+- **Validation:** strictly chronological. {season_label(split["burn_in"][0])} warms up the
+  ratings. Candidates train on {train_label} ({report["rows"]["train"]:,} matches) and are
+  compared on {validation_label}; the winner is refitted on {fit_label}
+  ({len(fit_df):,} matches) and scored once on {test_label}.
 - **Limitations:** no line-ups, injuries or expected-goals data, which is where bookmakers
   get their edge. Draws are almost never the top pick.
 

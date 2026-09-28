@@ -25,13 +25,13 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from feature_engineering import MODEL_FEATURES, build_features
+from feature_engineering import BOOKMAKER_PROBS, MODEL_FEATURES, build_features
 
 DATA_DIR = Path("data")
 MODELS_DIR = Path("models")
 METRICS_PATH = MODELS_DIR / "model_metrics.json"
 LABELS = ["A", "D", "H"]  # sorted, the column order log_loss expects
-BOOKIE_COLUMNS = ["NormProbAway_B365", "NormProbDraw_B365", "NormProbHome_B365"]
+BOOKIE_COLUMNS = [BOOKMAKER_PROBS[label] for label in LABELS]
 
 SEARCH_SPACE = {
     "Logistic Regression": {"C": [0.01, 0.05, 0.2, 1.0]},
@@ -111,7 +111,7 @@ def tune(train: pd.DataFrame, validation: pd.DataFrame, features: list[str]) -> 
     trials = []
     for algorithm, grid in SEARCH_SPACE.items():
         for values in product(*grid.values()):
-            params = dict(zip(grid.keys(), values))
+            params = dict(zip(grid.keys(), values, strict=True))
             model = make_model(algorithm, params).fit(train[features], train["Result"])
             trials.append(
                 {
@@ -157,12 +157,16 @@ def main() -> None:
     MODELS_DIR.mkdir(exist_ok=True)
     METRICS_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    bookie = report["bookmaker"]["test"]
-    print(f"Train {', '.join(split['train'])} | validate {split['validation'][0]} | test {split['test'][0]}")
-    print(f"  {'Bookmaker favourite':34s} acc {bookie['accuracy']:.3f}  log-loss {bookie['log_loss']:.4f}")
-    entry = report["model"]
-    label = f"Model ({entry['algorithm']})"
-    print(f"  {label:34s} acc {entry['test']['accuracy']:.3f}  log-loss {entry['test']['log_loss']:.4f}")
+    print(
+        f"Train {', '.join(split['train'])} | validate {split['validation'][0]}"
+        f" | test {split['test'][0]}"
+    )
+    rows = [
+        ("Bookmaker favourite", report["bookmaker"]["test"]),
+        (f"Model ({best['algorithm']})", report["model"]["test"]),
+    ]
+    for label, result in rows:
+        print(f"  {label:34s} acc {result['accuracy']:.3f}  log-loss {result['log_loss']:.4f}")
     print(f"Saved {METRICS_PATH}")
 
 

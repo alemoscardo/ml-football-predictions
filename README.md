@@ -73,7 +73,7 @@ plot of model vs. bookmaker.
 
 `tests/test_features.py` guards against look-ahead leakage: it tampers with one match's result
 and checks that neither that match's features nor any earlier ones change, and recomputes rolling
-form by hand. GitHub Actions runs the tests and the full training pipeline on every push.
+form by hand. GitHub Actions runs `ruff`, the tests and the full training pipeline on every push.
 
 ## Limitations
 
@@ -89,10 +89,14 @@ python fetch_data.py        # download season CSVs from Football-Data.co.uk into
 python train_models.py      # tune on 2024/25, score 2025/26, write models/model_metrics.json
 streamlit run streamlit_app.py
 
-pip install -r requirements-dev.txt && pytest   # tests
+pip install -r requirements-dev.txt && ruff check . && pytest   # lint + tests
 ```
 
 ## Data
 
 [Football-Data.co.uk](https://www.football-data.co.uk/englandm.php): results, match statistics
 and pre-match odds for every Premier League match.
+
+## License
+
+[MIT](LICENSE). Match data belongs to Football-Data.co.uk.
