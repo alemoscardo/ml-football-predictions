@@ -36,7 +36,8 @@ jobs:
           fi
       - name: Commit
         run: |
-          git add data/live predictions
+          git add data/live
+          if [ -d predictions ]; then git add predictions; fi # absent until the first forecast
           if git diff --cached --quiet; then
             echo "Nothing new to commit"
             exit 0
