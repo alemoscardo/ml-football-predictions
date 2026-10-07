@@ -73,15 +73,17 @@ Every trial is saved to `models/model_metrics.json` and shown in the app.
 
 ## The app
 
-- **Headline KPIs**: accuracy and log-loss, each against the bookmaker
-- **Live**: this season's forecasts from the ledger, upcoming and settled, with a running score
-- **How it compares**: the model next to random guessing, always backing the home side and the
-  bookmaker favourite
-- **How it behaves**: running accuracy across the season, confidence vs. hit rate (calibration),
-  confusion matrix and permutation feature importance
-- **Every match**: filterable table; select a row to compare the model's and the bookmaker's
-  probabilities, or export to CSV
-- **Method**: validation design, limitations and the full model-selection table
+Headline KPIs for the backtest and the live record, each against the bookmaker, then four tabs
+(each one linkable, e.g. `?tab=teams`):
+
+- **Live**: the next matches as the model's home/draw/away split next to Bet365's, then the
+  settled forecasts with a running accuracy against the bookmaker favourite
+- **Backtest**: the model next to random guessing, always backing the home side and the
+  bookmaker favourite; running accuracy, calibration, confusion matrix and permutation feature
+  importance; every match in a filterable table, exportable to CSV
+- **Teams**: current Elo ranking, and any club's rating after every match since 2014/15
+- **How it works**: validation design, the live pipeline, limitations and the full
+  model-selection table
 
 Models are refitted in-process at startup from the saved spec, so the app never depends on the
 scikit-learn version that wrote a pickle.

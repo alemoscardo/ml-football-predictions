@@ -68,11 +68,15 @@ def prepare_matches_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_elo(df: pd.DataFrame) -> pd.DataFrame:
-    """Pre-match Elo for both sides, updated after each result."""
+    """Pre-match Elo for both sides, updated after each result.
+
+    Post-match ratings are kept too, for display only: they include the match's own
+    result, so they must never be model features.
+    """
     ratings: dict[str, float] = {}
     first_season = df["SeasonFile"].iloc[0]
     season = None
-    home_elo, away_elo = [], []
+    home_elo, away_elo, home_after, away_after = [], [], [], []
 
     for row in df.itertuples(index=False):
         if row.SeasonFile != season:
@@ -88,6 +92,8 @@ def add_elo(df: pd.DataFrame) -> pd.DataFrame:
         away_elo.append(away)
 
         if pd.isna(row.HomeGoals) or pd.isna(row.AwayGoals):
+            home_after.append(home)
+            away_after.append(away)
             continue
         expected = 1 / (1 + 10 ** ((away - home - ELO_HOME_ADVANTAGE) / 400))
         if row.HomeGoals == row.AwayGoals:
@@ -98,9 +104,13 @@ def add_elo(df: pd.DataFrame) -> pd.DataFrame:
         change = ELO_K * margin * (actual - expected)
         ratings[row.HomeTeam] = home + change
         ratings[row.AwayTeam] = away - change
+        home_after.append(home + change)
+        away_after.append(away - change)
 
     df["HomeElo"] = home_elo
     df["AwayElo"] = away_elo
+    df["HomeEloAfter"] = home_after
+    df["AwayEloAfter"] = away_after
     df["EloDiff"] = df["HomeElo"] - df["AwayElo"]
     df["EloHomeWinProb"] = 1 / (1 + 10 ** (-(df["EloDiff"] + ELO_HOME_ADVANTAGE) / 400))
     return df

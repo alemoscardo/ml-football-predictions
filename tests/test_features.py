@@ -101,3 +101,17 @@ def test_season_split_is_chronological():
     order = split["burn_in"] + split["train"] + split["validation"] + split["test"]
     assert order == sorted(seasons["SeasonFile"])
     assert split["test"] == ["E0_2324"] and split["validation"] == ["E0_2223"]
+
+
+def test_post_match_elo_is_display_only(raw):
+    """Post-match ratings include the result itself, so they must never be features."""
+    assert not any(feature.endswith("After") for feature in MODEL_FEATURES)
+    features = build_features(raw)
+    # Within a season, a side's next pre-match rating is its last post-match one.
+    season = features[features["SeasonFile"] == "E0_2324"]
+    for team in ("Alpha", "Delta"):
+        games = season[(season.HomeTeam == team) | (season.AwayTeam == team)]
+        is_home = games.HomeTeam == team
+        before = np.where(is_home, games.HomeElo, games.AwayElo)
+        after = np.where(is_home, games.HomeEloAfter, games.AwayEloAfter)
+        np.testing.assert_allclose(before[1:], after[:-1])
