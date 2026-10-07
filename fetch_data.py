@@ -9,18 +9,45 @@ Usage:
 from __future__ import annotations
 
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
-BASE_URL = "https://www.football-data.co.uk/mmz4281/{code}/E0.csv"
+BASE_URL = "https://football-data.co.uk/mmz4281/{code}/E0.csv"
 DATA_DIR = Path("data")
 FIRST_SEASON = 2014
 LAST_SEASON = 2025
 
 
+def season_code(start_year: int) -> str:
+    """Start year → Football-Data code: 2014 → ``1415``."""
+    return f"{start_year % 100:02d}{(start_year + 1) % 100:02d}"
+
+
 def season_codes(first: int, last: int) -> list[str]:
-    """Start years → Football-Data codes: 2014 → ``1415``."""
-    return [f"{year % 100:02d}{(year + 1) % 100:02d}" for year in range(first, last + 1)]
+    return [season_code(year) for year in range(first, last + 1)]
+
+
+def download_csv(url: str, attempts: int = 4, wait: float = 15.0) -> bytes:
+    """Fetch a Football-Data CSV.
+
+    When busy, the site answers 200 with an HTML "temporarily unavailable" page, so
+    the body is checked for the CSV header and the request retried with backoff.
+    """
+    problem = ""
+    for attempt in range(1, attempts + 1):
+        request = urllib.request.Request(url, headers={"User-Agent": "ml-football-predictions"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = response.read()
+            if body.removeprefix(b"\xef\xbb\xbf").startswith(b"Div,"):
+                return body
+            problem = "response is not a Football-Data CSV"
+        except OSError as exc:  # URLError, HTTPError and timeouts
+            problem = str(exc)
+        if attempt < attempts:
+            time.sleep(wait * attempt)
+    raise RuntimeError(f"{url}: {problem} (after {attempts} attempts)")
 
 
 def main(argv: list[str]) -> None:
@@ -36,11 +63,7 @@ def main(argv: list[str]) -> None:
         if target.exists() and not force:
             print(f"skip   {target} (exists)")
             continue
-        request = urllib.request.Request(
-            BASE_URL.format(code=code), headers={"User-Agent": "ml-football-predictions"}
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            target.write_bytes(response.read())
+        target.write_bytes(download_csv(BASE_URL.format(code=code)))
         print(f"saved  {target}")
 
 

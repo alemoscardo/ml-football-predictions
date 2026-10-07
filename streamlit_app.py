@@ -18,6 +18,7 @@ from sklearn.inspection import permutation_importance
 from sklearn.metrics import log_loss, precision_recall_fscore_support
 
 from feature_engineering import BOOKMAKER_PROBS, FORM_WINDOW, MODEL_FEATURES
+from forecast import KICKOFF_TZ, live_scores, load_ledger, load_live_results, season_stem, settle
 from train_models import (
     DATA_DIR,
     METRICS_PATH,
@@ -47,6 +48,7 @@ st.markdown(
 
 CLASS_ORDER = ["H", "D", "A"]
 LABEL_MAP = {"H": "Home win", "D": "Draw", "A": "Away win"}
+REPO_URL = "https://github.com/alemoscardo/ml-football-predictions"
 
 W = FORM_WINDOW
 FEATURE_LABELS = {
@@ -509,6 +511,140 @@ k4.metric(
     border=True,
     height="stretch",
 )
+
+# --- Live forward test -------------------------------------------------------
+
+live = settle(load_ledger(), load_live_results())
+st.subheader(f"Live: {season_label(season_stem(pd.Timestamp.now(tz='UTC').date()))}")
+st.markdown(
+    "A backtest can always hide a subtle leak; a forecast published before the match "
+    "cannot. A scheduled GitHub Actions job forecasts every match **before kick-off** and "
+    "commits it to an append-only ledger, so the "
+    f"[commit history]({REPO_URL}/commits/main/predictions/live.csv) timestamps each one. "
+    "The model is frozen for the season: the same spec, refitted on every completed season."
+)
+
+if live.empty:
+    st.info(
+        "No forecasts logged yet: the first ones appear as soon as Football-Data.co.uk "
+        "publishes the next round of fixtures."
+    )
+else:
+    live["Pick"] = live[[f"P_{o}" for o in CLASS_ORDER]].idxmax(axis=1).str[-1]
+    live["BookiePick"] = live[[f"B_{o}" for o in CLASS_ORDER]].idxmax(axis=1).str[-1]
+    live["Kickoff"] = live["KickoffUTC"].dt.tz_convert(KICKOFF_TZ).dt.tz_localize(None)
+    live["Match"] = live["HomeTeam"] + " v " + live["AwayTeam"]
+    played = live.dropna(subset=["Result"])
+    pending = live[live["Result"].isna()].sort_values("KickoffUTC")
+
+    l1, l2, l3, l4 = st.columns(4)
+    l1.metric(
+        "Forecasts logged",
+        len(live),
+        help=f"Since {live['LoggedAtUTC'].min():%d %B %Y}, all before kick-off.",
+        border=True,
+        height="stretch",
+    )
+    l2.metric("Settled", len(played), border=True, height="stretch")
+    if len(played):
+        scores = live_scores(played)
+        model_live, bookie_live = scores["model"], scores["bookmaker"]
+        l3.metric(
+            "Live accuracy",
+            f"{model_live['accuracy']:.1%}",
+            delta=f"{(model_live['accuracy'] - bookie_live['accuracy']) * 100:+.1f} pts "
+            "vs bookmaker",
+            border=True,
+            height="stretch",
+        )
+        l4.metric(
+            "Live log-loss",
+            f"{model_live['log_loss']:.3f}",
+            delta=f"{model_live['log_loss'] - bookie_live['log_loss']:+.3f} vs bookmaker",
+            delta_color="inverse",
+            border=True,
+            height="stretch",
+        )
+    else:
+        l3.metric("Live accuracy", "—", help="Shown once the first match is played.", border=True)
+        l4.metric("Live log-loss", "—", border=True)
+
+    upcoming_tab, settled_tab = st.tabs(
+        [f"Awaiting result ({len(pending)})", f"Settled ({len(played)})"]
+    )
+    with upcoming_tab:
+        if len(pending):
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Kick-off": pending["Kickoff"],
+                        "Match": pending["Match"],
+                        "Pick": pending["Pick"].map(LABEL_MAP),
+                        **{LABEL_MAP[o]: pending[f"P_{o}"] * 100 for o in CLASS_ORDER},
+                        "Bookmaker": [
+                            " · ".join(f"{row[f'B_{o}']:.0%}" for o in CLASS_ORDER)
+                            for _, row in pending.iterrows()
+                        ],
+                        "Logged": [
+                            f"{lead.days}d {lead.seconds // 3600}h before"
+                            for lead in pending["KickoffUTC"] - pending["LoggedAtUTC"]
+                        ],
+                    }
+                ),
+                hide_index=True,
+                column_config={
+                    "Kick-off": st.column_config.DatetimeColumn(format="ddd D MMM, HH:mm"),
+                    **{
+                        LABEL_MAP[o]: st.column_config.ProgressColumn(
+                            format="%.0f%%", min_value=0, max_value=100, width=90
+                        )
+                        for o in CLASS_ORDER
+                    },
+                    "Bookmaker": st.column_config.TextColumn(
+                        help="Bet365 probabilities, margin removed: home · draw · away"
+                    ),
+                },
+            )
+            st.caption("Kick-off times are UK time. Probabilities are the model's, as logged.")
+        else:
+            st.caption("Nothing pending: every logged match has a result.")
+    with settled_tab:
+        if len(played):
+            recent = played.sort_values("KickoffUTC", ascending=False)
+            hit = recent["Pick"] == recent["Result"]
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Date": recent["Kickoff"],
+                        "Match": recent["HomeTeam"]
+                        + " "
+                        + recent["HomeGoals"].astype(int).astype(str)
+                        + "–"
+                        + recent["AwayGoals"].astype(int).astype(str)
+                        + " "
+                        + recent["AwayTeam"],
+                        "Prediction": recent["Pick"].map(LABEL_MAP),
+                        "Confidence": recent[[f"P_{o}" for o in CLASS_ORDER]].max(axis=1) * 100,
+                        "Bookmaker": recent["BookiePick"].map(LABEL_MAP),
+                        "": np.where(hit, "✓", "✗"),
+                    }
+                ),
+                hide_index=True,
+                column_config={
+                    "Date": st.column_config.DateColumn(format="DD MMM"),
+                    "Confidence": st.column_config.ProgressColumn(
+                        format="%.0f%%", min_value=0, max_value=100, width=100
+                    ),
+                    "Bookmaker": st.column_config.TextColumn("Bookmaker pick"),
+                    "": st.column_config.TextColumn(width="small"),
+                },
+            )
+            st.caption(
+                f"{len(played)} matches so far: too few to separate the model from the "
+                "bookmaker, which takes a few hundred. The live record grows every week."
+            )
+        else:
+            st.caption("The first results arrive after the next round is played.")
 
 # --- Benchmarks --------------------------------------------------------------
 

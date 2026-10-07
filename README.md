@@ -1,5 +1,6 @@
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://alemoscardo-ml-football-predictions-streamlit-app-vkbxgd.streamlit.app/)
 [![tests](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/tests.yml/badge.svg)](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/tests.yml)
+[![forecast](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/forecast.yml/badge.svg)](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/forecast.yml)
 
 # Premier League Outcome Model
 
@@ -22,6 +23,27 @@ Test season **2025/26** (380 matches), scored once after model selection on 2024
 
 Built only from public match history, with no odds as inputs, the model gets within 0.01
 log-loss of the bookmaker, whose odds also price in line-ups, injuries and market money.
+
+## Live forward test
+
+A backtest can always hide a subtle leak; a forecast published before the match cannot. Since
+October 2026 the model forecasts every 2026/27 match before kick-off, in public:
+
+- A scheduled GitHub Actions job ([`forecast.yml`](.github/workflows/forecast.yml)) runs
+  `forecast.py` every four hours: it refreshes this season's results and the upcoming fixtures,
+  builds pre-match features from every result so far, and forecasts each fixture that has not
+  kicked off.
+- Forecasts go to [`predictions/live.csv`](predictions/live.csv), an **append-only ledger**:
+  one row per match with the kick-off, the time it was logged, a model version hash, the
+  model's probabilities and the bookmaker's at that moment. Rows are appended, never rewritten,
+  and the workflow fails if a logged row changes.
+- Each run that adds rows is a commit by `github-actions[bot]`, so the
+  [commit history](https://github.com/alemoscardo/ml-football-predictions/commits/main/predictions/live.csv)
+  and the workflow logs timestamp every forecast.
+- The model is **frozen for the season**: the spec chosen on 2024/25, refitted once on every
+  completed season. Only its inputs move as results come in.
+
+The app scores the ledger against final results as the season goes, next to the bookmaker.
 
 ## How it works
 
@@ -52,6 +74,7 @@ Every trial is saved to `models/model_metrics.json` and shown in the app.
 ## The app
 
 - **Headline KPIs**: accuracy and log-loss, each against the bookmaker
+- **Live**: this season's forecasts from the ledger, upcoming and settled, with a running score
 - **How it compares**: the model next to random guessing, always backing the home side and the
   bookmaker favourite
 - **How it behaves**: running accuracy across the season, confidence vs. hit rate (calibration),
@@ -73,12 +96,17 @@ plot of model vs. bookmaker.
 
 `tests/test_features.py` guards against look-ahead leakage: it tampers with one match's result
 and checks that neither that match's features nor any earlier ones change, and recomputes rolling
-form by hand. GitHub Actions runs `ruff`, the tests and the full training pipeline on every push.
+form by hand. `tests/test_forecast.py` covers the live ledger: only matches not yet started are
+logged, logged rows are never rewritten, and an unplayed fixture adds no form or Elo change to the
+next one. GitHub Actions runs `ruff`, the tests and the full training pipeline on every push.
 
 ## Limitations
 
 - No line-ups, injuries or expected-goals data, which is where bookmakers get their edge
 - Draws are almost never the single most likely outcome, so they are rarely predicted
+- Clubs promoted after years away keep their old Elo, pulled towards the league average
+  (Hull start 2026/27 at 1485, above several established sides). Starting every promoted club
+  at the newcomer rating instead was tested and did not improve validation log-loss
 - One test season is 380 matches: differences of a point or two in accuracy are within noise
 
 ## Run locally
@@ -87,10 +115,14 @@ form by hand. GitHub Actions runs `ruff`, the tests and the full training pipeli
 pip install -r requirements.txt
 python fetch_data.py        # download season CSVs from Football-Data.co.uk into data/
 python train_models.py      # tune on 2024/25, score 2025/26, write models/model_metrics.json
+python forecast.py          # forecast upcoming fixtures, append to predictions/live.csv
 streamlit run streamlit_app.py
 
 pip install -r requirements-dev.txt && ruff check . && pytest   # lint + tests
 ```
+
+When a season ends, move its file from `data/live/` to `data/` and rerun `train_models.py`:
+the finished season becomes the new test season and the next one starts a fresh live record.
 
 ## Data
 

@@ -114,6 +114,10 @@ def add_rolling_form(df: pd.DataFrame) -> pd.DataFrame:
     away_points = np.select(
         [df["AwayGoals"] > df["HomeGoals"], df["AwayGoals"] == df["HomeGoals"]], [3, 1], 0
     ).astype(float)
+    # A fixture not played yet earns no points, rather than counting as a defeat.
+    unplayed = (df["HomeGoals"].isna() | df["AwayGoals"].isna()).to_numpy()
+    home_points[unplayed] = np.nan
+    away_points[unplayed] = np.nan
 
     long = pd.concat(
         [

@@ -1,0 +1,47 @@
+name: forecast
+
+# Logs a forecast for every upcoming Premier League match before kick-off and
+# commits it, so the repository history timestamps each prediction.
+on:
+  schedule:
+    - cron: "23 */4 * * *" # every four hours; Football-Data publishes fixtures a few days ahead
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python forecast.py
+      - name: Ledger is append-only
+        run: |
+          # numstat prints "added deleted path"; any deleted line means a logged forecast changed.
+          if git diff --numstat -- predictions/ | awk '$2 != "0" { bad = 1 } END { exit bad }'; then
+            echo "ok"
+          else
+            echo "::error::predictions/ has modified or deleted rows"
+            exit 1
+          fi
+      - name: Commit
+        run: |
+          git add data/live predictions
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Live forecast $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
