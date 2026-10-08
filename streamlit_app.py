@@ -108,6 +108,7 @@ PALETTES = {
         "outcomes": ["#3987e5", "#6f6e69", "#d95926"],
         "accent": "#10B981",
         "neutral": "#5A6B85",
+        "axis": "#e6eaf1",
         "text": "#E6EAF3",
         "muted": "#8B98AD",
         "families": ["#3987e5", "#d95926"],
@@ -115,15 +116,55 @@ PALETTES = {
     },
     "light": {
         "surface": "#ffffff",
-        "outcomes": ["#2a78d6", "#8d8c87", "#eb6834"],
+        "outcomes": ["#256abf", "#8d8c87", "#eb6834"],
         "accent": "#059669",
         "neutral": "#A3ACB9",
+        "axis": "#4B5563",
         "text": "#1F2937",
         "muted": "#6B7280",
         "families": ["#2a78d6", "#eb6834"],
         "ramp": ["#ecfdf5", "#047857"],
     },
 }
+
+
+# Pure black, not a softer near-black: whichever fill a label sits on, white or black
+# then reaches at least 4.5:1.
+INK_LIGHT, INK_DARK = "#ffffff", "#000000"
+
+
+def luminance(colour: str) -> float:
+    """WCAG relative luminance of a ``#rrggbb`` colour."""
+    channels = [int(colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    r, g, b = (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a: str, b: str) -> float:
+    high, low = sorted((luminance(a), luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def ink_on(fill: str) -> str:
+    """White or near-black, whichever reads better on ``fill``."""
+    return max((INK_LIGHT, INK_DARK), key=lambda ink: contrast(ink, fill))
+
+
+def mix(a: str, b: str, t: float) -> str:
+    """Linear RGB blend from ``a`` (t=0) to ``b`` (t=1), as Vega's ``rgb`` interpolation."""
+    start, end = ([int(c[i : i + 2], 16) for i in (1, 3, 5)] for c in (a, b))
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(start, end, strict=True))
+
+
+def show(chart: alt.Chart) -> None:
+    """Render a chart with axis and legend text in this theme's ink."""
+    ink = palette["axis"]
+    st.altair_chart(
+        chart.configure_axis(labelColor=ink, titleColor=ink).configure_legend(
+            labelColor=ink, titleColor=ink
+        ),
+        width="stretch",
+    )
 
 
 def season_label(stem: str) -> str:
@@ -445,6 +486,7 @@ def confusion_chart(scored: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
         .join(share.stack().rename("Share"))
         .reset_index(names=["Actual", "Predicted"])
     )
+    cells["Ink"] = [ink_on(mix(*palette["ramp"], share)) for share in cells["Share"]]
     base = alt.Chart(cells).encode(
         x=alt.X("Predicted:N", sort=labels, axis=alt.Axis(orient="top", labelAngle=0)),
         y=alt.Y("Actual:N", sort=labels),
@@ -452,7 +494,7 @@ def confusion_chart(scored: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     rect = base.mark_rect(cornerRadius=4, stroke=None).encode(
         color=alt.Color(
             "Share:Q",
-            scale=alt.Scale(domain=[0, 1], range=palette["ramp"]),
+            scale=alt.Scale(domain=[0, 1], range=palette["ramp"], interpolate="rgb"),
             legend=None,
         ),
         tooltip=[
@@ -464,9 +506,10 @@ def confusion_chart(scored: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     )
     text = base.mark_text(fontSize=14, fontWeight=600).encode(
         text="Count:Q",
-        color=alt.condition(alt.datum.Share > 0.5, alt.value("white"), alt.value(palette["muted"])),
+        color=alt.Color("Ink:N", scale=None),
     )
-    return (rect + text).properties(height=260)
+    # The counts carry their own literal colours: keep them off the fill scale.
+    return (rect + text).resolve_scale(color="independent").properties(height=260)
 
 
 def importance_chart(importance: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
@@ -570,6 +613,7 @@ def fixtures_chart(pending: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
                         "End": start + p,
                         "Mid": start + p / 2,
                         "IsModel": prefix == "P",
+                        "Ink": ink_on(palette["outcomes"][CLASS_ORDER.index(outcome)]),
                     }
                 )
                 start += p
@@ -620,10 +664,11 @@ def fixtures_chart(pending: pd.DataFrame, palette: dict[str, str]) -> alt.Chart:
     )
     values = (
         alt.Chart(data[data["IsModel"] & (data["Probability"] >= 0.12)])
-        .mark_text(fontSize=11, fontWeight=600, color="white")
+        .mark_text(fontSize=11, fontWeight=600)
         .encode(
             y=y,
             x=alt.X("Mid:Q", scale=scale),
+            color=alt.Color("Ink:N", scale=None),
             text=alt.Text("Probability:Q", format=".0%"),
             tooltip=tooltip,
         )
@@ -845,7 +890,7 @@ with live_tab:
     st.subheader("Next matches")
     if len(pending):
         with st.container(border=True):
-            st.altair_chart(fixtures_chart(pending, palette), width="stretch")
+            show(fixtures_chart(pending, palette))
             st.caption(
                 "For each match, the model's forecast as logged, then Bet365's odds with the "
                 "margin removed. Kick-off times are UK time."
@@ -901,9 +946,8 @@ with live_tab:
             with st.container(border=True):
                 st.markdown("**Running accuracy**")
                 st.caption("Share of live picks called correctly, against the bookmaker favourite.")
-                st.altair_chart(
+                show(
                     season_chart(live_hits, MODEL_LABEL, palette, skip=9, by_match=True),
-                    width="stretch",
                 )
         recent = live_hits.iloc[::-1]
         st.dataframe(
@@ -961,7 +1005,7 @@ with backtest_tab:
         columns=["Approach", "Accuracy", "How", "IsModel"],
     )
     with st.container(border=True):
-        st.altair_chart(benchmark_chart(benchmarks, palette), width="stretch")
+        show(benchmark_chart(benchmarks, palette))
         st.caption(
             "The bookmaker is the benchmark to beat: its odds already price in injuries, "
             "line-ups and market money that the model never sees. Matching it from public "
@@ -973,14 +1017,14 @@ with backtest_tab:
     with left, st.container(border=True):
         st.markdown("**Across the season**")
         st.caption("Running accuracy as the season unfolds, against the bookmaker favourite.")
-        st.altair_chart(season_chart(scored, MODEL_LABEL, palette), width="stretch")
+        show(season_chart(scored, MODEL_LABEL, palette))
     with right, st.container(border=True):
         st.markdown("**When it is confident, is it right?**")
         st.caption(
             "Bars: how often picks in each band were correct. Ticks: the confidence the model "
             "stated; ticks close to the bars mean well-calibrated probabilities. Labels: matches."
         )
-        st.altair_chart(confidence_chart(scored, palette), width="stretch")
+        show(confidence_chart(scored, palette))
 
     left, right = st.columns(2)
     with left, st.container(border=True):
@@ -991,28 +1035,28 @@ with backtest_tab:
             f"{int((y_true == 'D').sum())} happened, the model called {draws_called}. "
             "A draw is rarely the single most likely outcome, for bookmakers too."
         )
-        st.altair_chart(confusion_chart(scored, palette), width="stretch")
+        show(confusion_chart(scored, palette))
     with right, st.container(border=True):
         st.markdown("**What drives the predictions**")
         st.caption(
             "Top ten features by how much shuffling each one hurts the test-season log-loss."
         )
-        st.altair_chart(importance_chart(feature_importance(fingerprint), palette), width="stretch")
+        show(importance_chart(feature_importance(fingerprint), palette))
 
     st.subheader("Every match")
     f1, f2 = st.columns([2, 1], vertical_alignment="bottom")
     teams = sorted(set(scored["Home"]) | set(scored["Away"]))
     selected_teams = f1.multiselect("Team", teams, placeholder="All teams")
-    show = f2.segmented_control(
+    subset = f2.segmented_control(
         "Show", ["All", "Misses", "Model beat bookmaker"], default="All", required=True
     )
 
     view = scored
     if selected_teams:
         view = view[view["Home"].isin(selected_teams) | view["Away"].isin(selected_teams)]
-    if show == "Misses":
+    if subset == "Misses":
         view = view[~view["Hit"]]
-    elif show == "Model beat bookmaker":
+    elif subset == "Model beat bookmaker":
         view = view[view["Hit"] & ~view["BookieHit"]]
 
     table = pd.DataFrame(
@@ -1061,7 +1105,7 @@ with backtest_tab:
                 f"**{match['Home']} {match['HomeGoals']}–{match['AwayGoals']} {match['Away']}**"
                 f"  \n{match['Date']:%A %d %B %Y} · result: {LABEL_MAP[match['Result']]}"
             )
-            st.altair_chart(match_chart(match, MODEL_LABEL, palette), width="stretch")
+            show(match_chart(match, MODEL_LABEL, palette))
             verdict = "✓ model right" if match["Hit"] else "✗ model wrong"
             bookie_verdict = "✓ bookmaker right" if match["BookieHit"] else "✗ bookmaker wrong"
             st.caption(f"{verdict} · {bookie_verdict}")
@@ -1092,14 +1136,14 @@ with teams_tab:
             "Elo after each club's latest match. The line is 1500, the long-run league "
             "average; promoted clubs new to the data start at 1420."
         )
-        st.altair_chart(elo_ranking_chart(ranking, team, palette), width="stretch")
+        show(elo_ranking_chart(ranking, team, palette))
     with right, st.container(border=True):
         st.markdown(f"**{team} since {season_label(history['Season'].min())}**")
         st.caption(
             f"Rated {position['Elo']:.0f} after its latest match, #{int(position['Rank'])} of "
             f"{len(ranking)}. Gaps are seasons outside the Premier League."
         )
-        st.altair_chart(elo_history_chart(history, team, palette), width="stretch")
+        show(elo_history_chart(history, team, palette))
 
 # --- How it works ------------------------------------------------------------
 

@@ -5,7 +5,8 @@
 primaryColor = "#10B981"
 
 [theme.light]
-primaryColor = "#059669"
+# Dark enough for the active tab and selected controls to read as text (5.5:1).
+primaryColor = "#047857"
 
 [browser]
 gatherUsageStats = false
