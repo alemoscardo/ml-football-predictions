@@ -92,6 +92,11 @@ def make_model(algorithm: str, params: dict[str, float]) -> Pipeline:
     raise ValueError(f"Unknown algorithm: {algorithm}")
 
 
+def fit_spec(spec: dict, frame: pd.DataFrame) -> Pipeline:
+    """A spec from the report (``algorithm`` and ``params``), fitted on ``frame``'s matches."""
+    return make_model(spec["algorithm"], spec["params"]).fit(frame[MODEL_FEATURES], frame["Result"])
+
+
 def score(y_true: pd.Series, proba: np.ndarray) -> dict[str, float]:
     picks = np.array(LABELS)[proba.argmax(axis=1)]
     return {
@@ -142,9 +147,7 @@ def main() -> None:
     trials = tune(train, validation, MODEL_FEATURES)
     best = trials[0]
     # Refit the chosen spec on train + validation, then score the test season once.
-    model = make_model(best["algorithm"], best["params"]).fit(
-        final_train[MODEL_FEATURES], final_train["Result"]
-    )
+    model = fit_spec(best, final_train)
     report["model"] = {
         "features": MODEL_FEATURES,
         "algorithm": best["algorithm"],

@@ -33,9 +33,9 @@ from train_models import (
     DATA_DIR,
     LABELS,
     METRICS_PATH,
+    fit_spec,
     load_dataset,
     load_raw_matches,
-    make_model,
     predict_sorted,
     score,
     split_seasons,
@@ -64,6 +64,12 @@ def season_stem(today: date) -> str:
     """The season under way on ``today``: seasons start in August, so July onwards."""
     start = today.year if today.month >= 7 else today.year - 1
     return f"{LEAGUE}_{season_code(start)}"
+
+
+def season_label(stem: str) -> str:
+    """``E0_2324`` → ``2023/24``; anything else comes back unchanged."""
+    code = stem.split("_")[-1]
+    return f"20{code[:2]}/{code[2:]}" if len(code) == 4 and code.isdigit() else stem
 
 
 def load_live_results() -> pd.DataFrame:
@@ -110,7 +116,7 @@ def fit_frozen_model(spec: dict) -> Pipeline:
     history = load_dataset()
     burn_in = split_seasons(history)["burn_in"]
     fit = history[~history["SeasonFile"].isin(burn_in)]
-    return make_model(spec["algorithm"], spec["params"]).fit(fit[MODEL_FEATURES], fit["Result"])
+    return fit_spec(spec, fit)
 
 
 def model_version(spec: dict) -> str:
@@ -184,9 +190,7 @@ def check_entries(entries: pd.DataFrame) -> list[str]:
 
 
 def load_ledger(path: Path = LEDGER_PATH) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame(columns=LEDGER_COLUMNS)
-    ledger = pd.read_csv(path)
+    ledger = pd.read_csv(path) if path.exists() else pd.DataFrame(columns=LEDGER_COLUMNS)
     for column in ("KickoffUTC", "LoggedAtUTC"):
         ledger[column] = pd.to_datetime(ledger[column], format=TIME_FORMAT, utc=True)
     return ledger

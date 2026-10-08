@@ -32,15 +32,16 @@ from forecast import (
     live_scores,
     load_ledger,
     load_live_results,
+    season_label,
     season_stem,
     settle,
 )
 from train_models import (
     DATA_DIR,
     METRICS_PATH,
+    fit_spec,
     load_dataset,
     load_raw_matches,
-    make_model,
     predict_sorted,
     split_seasons,
 )
@@ -167,12 +168,6 @@ def show(chart: alt.Chart) -> None:
     )
 
 
-def season_label(stem: str) -> str:
-    """``E0_2324`` → ``2023/24``."""
-    code = stem.split("_")[-1]
-    return f"20{code[:2]}/{code[2:]}" if len(code) == 4 and code.isdigit() else stem
-
-
 def season_span(stems: list[str]) -> str:
     first, last = season_label(stems[0]), season_label(stems[-1])
     return first if first == last else f"{first} – {last}"
@@ -227,9 +222,7 @@ def load_experiment(fingerprint: str):
     fit_df = matches[matches["SeasonFile"].isin(split["train"] + split["validation"])]
     test_df = matches[matches["SeasonFile"].isin(split["test"])].reset_index(drop=True)
     spec = load_report()["model"]
-    model = make_model(spec["algorithm"], spec["params"]).fit(
-        fit_df[MODEL_FEATURES], fit_df["Result"]
-    )
+    model = fit_spec(spec, fit_df)
     return fit_df, test_df, model, split
 
 
