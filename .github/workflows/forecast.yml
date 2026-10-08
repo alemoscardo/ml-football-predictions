@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write # to start the site rebuild after a commit
 
 concurrency:
   group: forecast
@@ -46,3 +47,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Live forecast $(date -u +%Y-%m-%dT%H:%MZ)"
           git push
+          # Pushes made with GITHUB_TOKEN start no workflows, so ask for the rebuild here.
+          gh workflow run site.yml --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}

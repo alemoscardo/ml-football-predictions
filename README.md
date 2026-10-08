@@ -1,4 +1,4 @@
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://alemoscardo-ml-football-predictions-streamlit-app-vkbxgd.streamlit.app/)
+[![site](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/site.yml/badge.svg)](https://alemoscardo.github.io/ml-football-predictions/)
 [![tests](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/tests.yml/badge.svg)](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/tests.yml)
 [![forecast](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/forecast.yml/badge.svg)](https://github.com/alemoscardo/ml-football-predictions/actions/workflows/forecast.yml)
 
@@ -8,7 +8,11 @@ Forecasts English Premier League results (home win / draw / away win) **before k
 using only information available at the time, and measures the forecasts against the
 bookmaker on a season the model never saw.
 
-![Dashboard](docs/dashboard.png)
+**[Website](https://alemoscardo.github.io/ml-football-predictions/)** · forecasts, track record and
+club ratings · [Streamlit app](https://alemoscardo-ml-football-predictions-streamlit-app-vkbxgd.streamlit.app/)
+for the full model analysis
+
+![The website: a matchweek's forecasts, one match open](docs/site.png)
 
 ## Results
 
@@ -43,7 +47,8 @@ October 2026 the model forecasts every 2026/27 match before kick-off, in public:
 - The model is **frozen for the season**: the spec chosen on 2024/25, refitted once on every
   completed season. Only its inputs move as results come in.
 
-The app scores the ledger against final results as the season goes, next to the bookmaker.
+The website and the app score the ledger against final results as the season goes, next to
+the bookmaker.
 
 ## How it works
 
@@ -71,10 +76,32 @@ Candidates are logistic regression (several regularisation strengths) and extra 
 leaf-size grid). The winner is refitted on train + validation before the test season is scored.
 Every trial is saved to `models/model_metrics.json` and shown in the app.
 
-## The app
+## The website
 
-Headline KPIs for the backtest and the live record, each against the bookmaker, then four tabs
-(each one linkable, e.g. `?tab=teams`):
+A static site in [`site/`](site) (Vite, React, TypeScript), published to GitHub Pages by
+[`site.yml`](.github/workflows/site.yml) on every push and after every forecast run. It computes
+nothing: [`export_site.py`](export_site.py) writes everything it shows to JSON.
+
+- **Matches**: each matchweek as cards, the model's split above Bet365's. Select a match for the
+  probabilities side by side, what the model saw before kick-off and, for live forecasts, the
+  commit that logged it. Matchweeks played before the ledger existed are shown as *simulated*:
+  the frozen model run after the match, labelled as such and kept out of the live record.
+- **Record**: the live record against Bet365, and the backtest's running log-loss gap, baselines
+  and calibration.
+- **Teams**: Elo ranking and form, and each club's rating this season against the rest.
+- **How it works**: the pipeline, live and simulated forecasts, the validation design and the
+  limitations.
+
+On a phone the match detail opens as a bottom sheet:
+
+<img src="docs/site-phone.png" alt="The website on a phone, a match's detail open" width="300">
+
+## The Streamlit app
+
+The analysis view, with what the site leaves out: the confusion matrix, permutation feature
+importance, every backtest match and the full model-selection table. Headline KPIs for the
+backtest and the live record, each against the bookmaker, then four tabs (each one linkable,
+e.g. `?tab=teams`):
 
 - **Live**: the next matches as the model's home/draw/away split next to Bet365's, then the
   settled forecasts with a running accuracy against the bookmaker favourite
@@ -100,7 +127,10 @@ plot of model vs. bookmaker.
 and checks that neither that match's features nor any earlier ones change, and recomputes rolling
 form by hand. `tests/test_forecast.py` covers the live ledger: only matches not yet started are
 logged, logged rows are never rewritten, and an unplayed fixture adds no form or Elo change to the
-next one. GitHub Actions runs `ruff`, the tests and the full training pipeline on every push.
+next one. `tests/test_export_site.py` checks the site's data: valid distributions, live forecasts
+taking precedence over simulated ones, and backtest numbers that match the model report.
+`tests/test_app.py` runs the Streamlit app end to end. GitHub Actions runs `ruff`, the tests, the
+full training pipeline and the site's type-check and build on every push.
 
 ## Limitations
 
@@ -120,7 +150,10 @@ python train_models.py      # tune on 2024/25, score 2025/26, write models/model
 python forecast.py          # forecast upcoming fixtures, append to predictions/live.csv
 streamlit run streamlit_app.py
 
-pip install -r requirements-dev.txt && ruff check . && pytest   # lint + tests
+python export_site.py       # write the site's data to site/public/data/
+cd site && npm install && npm run dev   # the static site, with hot reload
+
+pip install -r requirements-dev.txt && ruff check . && pytest   # lint + tests (+ notebook deps)
 ```
 
 When a season ends, move its file from `data/live/` to `data/` and rerun `train_models.py`:
